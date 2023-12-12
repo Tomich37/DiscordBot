@@ -31,5 +31,18 @@ class SlashCommands(commands.Cog):
             await inter.response.send_message(f"Произошла ошибка")
             self.logger.info(f"Произошла ошибка: {e}")
 
+    @commands.slash_command(
+        name="contest",
+        description="Организация конкурса",
+    )
+    @commands.has_permissions(administrator=True)  # Можно изменить на более подходящие права
+    async def addreaction(self, inter, channel: disnake.TextChannel, emoji: disnake.Emoji):
+        guild_id = inter.guild.id
+        channel_id = channel.id
+        emoji_str = str(emoji)
+        
+        print(guild_id, channel_id, emoji_str)
+        await inter.response.send_message(f'{guild_id}, {channel_id}, {emoji_str}')
+
 def setup(bot, logger):
     bot.add_cog(SlashCommands(bot, logger))
