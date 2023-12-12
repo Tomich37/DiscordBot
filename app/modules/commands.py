@@ -1,10 +1,12 @@
 import disnake
 from disnake.ext import commands
+from app.modules.database import Database
 
 class SlashCommands(commands.Cog):
     def __init__(self, bot, logger):
         self.bot = bot
         self.logger = logger
+        self.db= Database(self.logger)
 
     @commands.slash_command(
         name="ping",
@@ -77,8 +79,11 @@ class SlashCommands(commands.Cog):
             guild_id = inter.guild.id
             channel_id = channel.id
             emoji_str = str(emoji)
-            
+            status = True if status == 'start' else False
+
             print(guild_id, channel_id, emoji_str, status)
+            self.db.create_contest(guild_id, channel_id, emoji_str, status)
+            
             await inter.response.send_message(f'{guild_id}, {channel_id}, {emoji_str}, {status}')
         except Exception as e:
             print(f'Ошибка в commands/contest: {e}')
