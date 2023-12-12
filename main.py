@@ -6,7 +6,7 @@ import configparser
 import disnake
 from disnake.ext import commands
 
-# токен и URI
+# токен
 config = configparser.ConfigParser()
 config.read('./config.ini')
 token = config.get('token', 'token')

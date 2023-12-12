@@ -6,7 +6,7 @@ class SlashCommands(commands.Cog):
     def __init__(self, bot, logger):
         self.bot = bot
         self.logger = logger
-        self.db= Database(self.logger)
+        self.db= Database()
 
     @commands.slash_command(
         name="ping",
@@ -80,13 +80,14 @@ class SlashCommands(commands.Cog):
             channel_id = channel.id
             emoji_str = str(emoji)
             status = True if status == 'start' else False
-
-            print(guild_id, channel_id, emoji_str, status)
-            self.db.create_contest(guild_id, channel_id, emoji_str, status)
+            self.db.create_update_contest(guild_id, channel_id, emoji_str, status)
             
-            await inter.response.send_message(f'{guild_id}, {channel_id}, {emoji_str}, {status}')
+            if status:
+                await inter.response.send_message(f'Конкурс в канале <#{channel_id}> активирован. Выбранное емодзи: {emoji_str}')
+            else:
+                await inter.response.send_message(f'Конкурс в канале <#{channel_id}> деактивирован')
         except Exception as e:
-            print(f'Ошибка в commands/contest: {e}')
+            self.logger.error(f'Ошибка в commands/contest: {e}')
             
 
 def setup(bot, logger):
