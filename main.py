@@ -1,6 +1,7 @@
 from app.modules.logger import SetLogs
 from app.modules.messages import Messages
 from app.modules.commands import setup as setup_commands
+
 import configparser
 import disnake
 from disnake.ext import commands
@@ -20,7 +21,6 @@ class Bot(commands.Bot):
     async def on_ready(self):
         print(f"Logged in as {self.user}")
         print("------")
-
 pybot = Bot(logger)
 
 # Обработка сообщений из чата
