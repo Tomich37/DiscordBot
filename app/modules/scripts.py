@@ -15,7 +15,6 @@ class Scripts:
             channel = self.bot.get_channel(channel_id)
             match = re.match(r'<:(\w+):(\d+)>', emoji)
             if match:
-                # Извлекаем имя и id из соответствующих групп
                 name = match.group(1)
                 emoji_id = int(match.group(2))
             else:
@@ -49,10 +48,10 @@ class Scripts:
             print(f'Ошибка в scripts/read_messages_with_reaction: {e}')
 
     # Генерация и отправка эмбедов
-    async def send_embeds(self, sorted_messages, channel):
+    async def send_embeds(self, sorted_messages, channel, top_count=10):
         try:
             place = 0
-            for sorted_message in sorted_messages:
+            for sorted_message in sorted_messages[:top_count]:
                     place += 1
                     embed = disnake.Embed(
                         title=f"{place} место",
@@ -69,6 +68,7 @@ class Scripts:
                     )
                     embed.set_footer(text=f'Количество голосов {sorted_message["reactions_count"]}')
                     await channel.send(embed=embed)
+            self.all_messages.clear
         except Exception as e:
             self.logger.error(f'Ошибка в scripts/send_embeds: {e}')
             print(f'Ошибка в scripts/send_embeds: {e}')
