@@ -2,6 +2,7 @@ import disnake
 from disnake.ext import commands
 from app.modules.database import Database
 from app.modules.scripts import Scripts
+from app.modules.modals.recruitment import RecruitmentSelect
 
 class SlashCommands(commands.Cog):
     def __init__(self, bot, logger):
@@ -17,6 +18,7 @@ class SlashCommands(commands.Cog):
     async def ping(self, inter):
         await inter.response.send_message("Понг!")
 
+    # Назанчение или снятие роли
     roleMenegment = commands.option_enum({"Назначить роль": "add", "Снять роль": "take"})  
     @commands.slash_command(
         name="role",
@@ -55,6 +57,7 @@ class SlashCommands(commands.Cog):
             await inter.response.send_message(f"Произошла ошибка")
             self.logger.info(f"Произошла ошибка: {e}")
 
+    # Создание или завершение конкурса
     contestStatus = commands.option_enum({"Запуск конкурса": "start", "Завершение конкурса": "stop"})    
     @commands.slash_command(
         name="contest",
@@ -91,6 +94,21 @@ class SlashCommands(commands.Cog):
                 await inter.response.send_message(f'Конкурс в канале <#{channel_id}> завершен')
         except Exception as e:
             self.logger.error(f'Ошибка в commands/contest: {e}')
+
+    @commands.slash_command(
+        name="recruit",
+        description="Организация набора в админский состав",
+    )
+    @commands.has_permissions(administrator=True)
+    async def recruit(self, inter: disnake.GuildCommandInteraction):
+        """
+            Отправка сообщения на набор в администрацию
+        """
+        view = disnake.ui.View()
+        view.add_item(RecruitmentSelect())
+        await inter.send('Выберите желаемую роль', view=view)
+        
+
             
 
 def setup(bot, logger):

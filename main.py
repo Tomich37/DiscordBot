@@ -1,6 +1,6 @@
 from app.modules.logger import SetLogs
 from app.modules.messages import Messages
-from app.modules.commands import setup as setup_commands
+from app.modules.cogs.commands import setup as setup_commands
 
 import configparser
 import disnake
