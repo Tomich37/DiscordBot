@@ -18,6 +18,13 @@ class Contests(Base):
     channel_id = Column(BigInteger,)
     emoji_str = Column(String,)
     status = Column(Boolean,)
+
+class Recruitments(Base):
+    __tablename__ = "recruitments"
+    id = Column(Integer, primary_key=True, index=True)
+    guild_id = Column(BigInteger)
+    channel_id = Column(BigInteger,)
+    message_id = Column(BigInteger,)
   
 # создаем таблицы
 Base.metadata.create_all(bind=engine)

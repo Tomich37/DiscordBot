@@ -2,7 +2,7 @@ import disnake
 from disnake.ext import commands
 from app.modules.database import Database
 from app.modules.scripts import Scripts
-from app.modules.modals.recruitment import RecruitmentSelect
+from app.modules.menus.recruitment import RecruitmentSelect
 
 class SlashCommands(commands.Cog):
     def __init__(self, bot, logger):
@@ -100,16 +100,36 @@ class SlashCommands(commands.Cog):
         description="Организация набора в админский состав",
     )
     @commands.has_permissions(administrator=True)
-    async def recruit(self, inter: disnake.GuildCommandInteraction):
+    async def recruit(
+        self, 
+        inter: disnake.GuildCommandInteraction,
+        channel: disnake.TextChannel,
+    ):
         """
-            Отправка сообщения на набор в администрацию
-        """
-        view = disnake.ui.View()
-        view.add_item(RecruitmentSelect())
-        await inter.send('Выберите желаемую роль', view=view)
-        
+            Отправка сообщения на набор в администрацию.
 
-            
+            Parameters
+            ----------
+            channel: Выбор канала, куда будут отправляться заполненные заявки
+        """
+        try:
+            self.guild_id = inter.guild.id
+            self.db.create_update_recruitment_channel(self.guild_id, channel.id)
+            view = disnake.ui.View()
+            view.add_item(RecruitmentSelect(self.logger, self.guild_id))
+            await inter.send('Выберите желаемую роль', view=view)
+        except Exception as e:
+            self.logger.error(f'Ошибка в commands/recruit: {e}')
+            print(f'Ошибка в commands/recruit: {e}')
+
+        
+    @commands.Cog.listener()
+    async def on_connect(self):
+        message_id = self.db.get_recruitment_by_guild(self.guild_id).message_id
+        print(message_id)
+        view = disnake.ui.View(timeout=None)
+        view.add_item(RecruitmentSelect(self.logger, self.guild_id))
+        self.bot.add_view(view, message_id=message_id)  # Вставить ID сообщения, которое отправится после использования с команда recruit
 
 def setup(bot, logger):
     bot.add_cog(SlashCommands(bot, logger))

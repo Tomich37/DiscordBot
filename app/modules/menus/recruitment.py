@@ -1,11 +1,14 @@
 import disnake
-from disnake.ext import commands
 from disnake.interactions import MessageInteraction
-from disnake import TextInputStyle
+from app.modules.modals.recruitmentmodal import RecruitementModal
+from app.modules.database import Database
 
 # Меню для выбора роли
 class RecruitmentSelect(disnake.ui.StringSelect):
-    def __init__(self):
+    def __init__(self, logger, guild_id):
+        self.logger = logger
+        self.guild_id = guild_id
+        self.db = Database()
         options = [
             disnake.SelectOption(label='Харон', value='Харон', description='Роль для собеседований и принятия на сервер'),
             disnake.SelectOption(label='Страж', value='Страж', description='Роль модератора'),
@@ -16,9 +19,16 @@ class RecruitmentSelect(disnake.ui.StringSelect):
             )
         
     async def callback(self, interaction: MessageInteraction):
-        if not interaction.values:
-            await interaction.response.defer()
-        else:
-            await interaction.response.send_message(
-                f"Вы выбрали {interaction.values[0]}", ephemeral=True
-            )
+        try:
+            if not interaction.values:
+                await interaction.response.defer()
+            else:
+                response_message = await interaction.response.send_message(
+                    await interaction.response.send_modal(RecruitementModal(interaction.values[0], self.guild_id, self.logger))
+                )
+                message_id = response_message.id
+                self.db.create_update_recruitment_message(message_id)
+        except Exception as e:
+            self.logger.error(f'Ошибка в menus/recruitment: {e}')
+            print(f'Ошибка в menus/recruitment: {e}')
+
