@@ -11,41 +11,11 @@ class SlashCommands(commands.Cog):
         self.sc = Scripts(logger, bot)
 
     @commands.slash_command(
-        name='help',
-        description='Помощь по боту'
-    )
-    async def help(
-        self,
-        inter: disnake.GuildCommandInteraction,
-    ):
-        """
-            Назначение роли участнику сервера
-        """
-        embed = disnake.Embed(
-            title=f"Помощь по командам бота",
-            description="",
-            color=0x00ff00
-        )
-        embed.add_field(
-            name="Модерация",
-            value="""**contest** - организация конкурса в поределенном канале
-            **role** - назначить / снять роль с участника""",
-            inline=False
-        )
-        embed.add_field(
-            name="Другое",
-            value="""**ping** - пинг бота""",
-            inline=False
-        )
-        embed.set_footer(text=f'Made by the_usual_god')
-        await inter.response.send_message(embed=embed)
-
-    @commands.slash_command(
         name="ping",
         description="Возвращает задержку бота",
     )
     async def ping(self, inter):
-        await inter.response.send_message("Понг!")
+        await inter.response.send_message(f"Понг! {round(self.bot.latency * 1000)}мс")
 
     roleMenegment = commands.option_enum({"Назначить роль": "add", "Снять роль": "take"})  
     @commands.slash_command(
