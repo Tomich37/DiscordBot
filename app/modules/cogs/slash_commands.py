@@ -78,6 +78,7 @@ class SlashCommands(commands.Cog):
             status: Параметр, управляющий стартом и завершением конкурса
         """
         try:
+            await inter.response.defer(ephemeral=True) # Чтоб бот не выдавал ошибку из-за зависания
             guild_id = inter.guild.id
             channel_id = channel.id
             emoji_str = str(emoji)
