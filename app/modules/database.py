@@ -1,7 +1,7 @@
 from app.modules.alchemy_connect import Session, engine, Contests
 
 class Database():
-    def create_update_contest(self, guild_id, channel_id, emoji_str, status):
+    def create_update_contest(self, guild_id: int, channel_id: int, emoji_str: str, status: bool):
         with Session(autoflush=False, bind=engine) as db:
             # Проверяем, существует ли запись с заданными guild_id и channel_id
             existing_contest = db.query(Contests).filter_by(guild_id=guild_id, channel_id=channel_id).first()
