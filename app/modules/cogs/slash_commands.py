@@ -78,7 +78,7 @@ class SlashCommands(commands.Cog):
             status: Параметр, управляющий стартом и завершением конкурса
         """
         try:
-            await inter.response.defer(ephemeral=True) # Чтоб бот не выдавал ошибку из-за зависания
+            await inter.response.defer(ephemeral=False) # Чтоб бот не выдавал ошибку из-за зависания
             guild_id = inter.guild.id
             channel_id = channel.id
             emoji_str = str(emoji)
@@ -89,7 +89,7 @@ class SlashCommands(commands.Cog):
                 await inter.response.send_message(f'Конкурс в канале <#{channel_id}> активирован. Выбранное емодзи: {emoji_str}')
             else:
                 await self.sc.read_messages_with_reaction(channel_id, emoji_str, inter)
-                await inter.response.send_message(f'Конкурс в канале <#{channel_id}> завершен')
+                await inter.send(f'Конкурс в канале <#{channel_id}> завершен', ephemeral=False)
         except Exception as e:
             self.logger.error(f'Ошибка в commands/contest: {e}')
             
