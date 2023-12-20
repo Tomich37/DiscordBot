@@ -14,7 +14,6 @@ class Scripts:
         try:
             channel = self.bot.get_channel(channel_id)
             match = re.match(r'<a?:(\w+):(\d+)>', emoji)
-            print(match, emoji)
             if match:
                 name = match.group(1)
                 emoji_id = int(match.group(2))
