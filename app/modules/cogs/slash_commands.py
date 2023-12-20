@@ -55,7 +55,7 @@ class SlashCommands(commands.Cog):
             await inter.response.send_message(f"Произошла ошибка")
             self.logger.info(f"Произошла ошибка: {e}")
 
-    contestStatus = commands.option_enum({"Запуск конкурса": "start", "Завершение конкурса": "stop"})    
+    contestStatus = commands.option_enum({"Запуск конкурса": "start", "Завершение конкурса": "stop"})
     @commands.slash_command(
         name="contest",
         description="Организация конкурса",
@@ -73,7 +73,7 @@ class SlashCommands(commands.Cog):
 
             Parameters
             ----------
-            channel: Выбор канала ,в котором будет проводться или завершаться конкурс
+            channel: Выбор канала, в котором будет проводться или завершаться конкурс
             emoji: Эмодзи, которая будет автоматически проставляться на новых сообщениях
             status: Параметр, управляющий стартом и завершением конкурса
         """
