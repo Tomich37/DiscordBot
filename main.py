@@ -1,9 +1,11 @@
 from app.modules.logger import SetLogs
 from app.modules.messages import Messages
-from app.modules.commands import setup as setup_commands
+from app.modules.cogs.slash_commands import setup as setup_commands
 
 import configparser
 import disnake
+import os
+import importlib
 from disnake.ext import commands
 
 # токен
@@ -29,7 +31,12 @@ async def on_message(message):
     msg_handler = Messages(logger, pybot, message)
     await msg_handler.process_message()
 
+cogs_dir = "./app/modules/cogs"
 # Обработка слэш-команд
-setup_commands(pybot, logger)
+for file in os.listdir(cogs_dir):
+    if file.endswith(".py"):
+        module_name = f"app.modules.cogs.{file[:-3]}"
+        cog = importlib.import_module(module_name)
+        cog.setup(pybot, logger)
 
 pybot.run(token)
