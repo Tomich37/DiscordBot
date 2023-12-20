@@ -86,12 +86,13 @@ class SlashCommands(commands.Cog):
             self.db.create_update_contest(guild_id, channel_id, emoji_str, bool(status))
             
             if status:
-                await inter.response.send_message(f'Конкурс в канале <#{channel_id}> активирован. Выбранное емодзи: {emoji_str}')
+                await inter.send(f'Конкурс в канале <#{channel_id}> активирован. Выбранное емодзи: {emoji_str}', ephemeral=False)
             else:
                 await self.sc.read_messages_with_reaction(channel_id, emoji_str, inter)
                 await inter.send(f'Конкурс в канале <#{channel_id}> завершен', ephemeral=False)
         except Exception as e:
             self.logger.error(f'Ошибка в commands/contest: {e}')
+            print(f'Ошибка в commands/contest: {e}')
             
 
 def setup(bot, logger):
