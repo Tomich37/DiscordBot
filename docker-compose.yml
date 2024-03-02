@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  emilia-db:
+    image: postgres
+    environment:
+      POSTGRES_PASSWORD: 123QWEmax
+    ports:
+      - "5435:5432"
+    networks:
+      - discord_network
+
+  emilia-bot:
+    build: .
+    environment:
+      DATABASE_URL: postgresql://postgres:123QWEmax@localhost:5435/postgres
+    depends_on:
+      - emilia-db
+    networks:
+      - discord_network
+
+networks:
+  discord_network:

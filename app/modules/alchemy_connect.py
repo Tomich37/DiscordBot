@@ -3,10 +3,12 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy import  Column, Integer, String, Boolean, BigInteger
 from sqlalchemy.orm import DeclarativeBase
 import configparser
+import os
 
-config = configparser.ConfigParser()
-config.read('./config.ini')
-DATABASE_URL = config.get('pg', 'URI')
+# config = configparser.ConfigParser()
+# config.read('./config.ini')
+# DATABASE_URL = config.get('pg', 'URI')
+DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql://postgres:123QWEmax@localhost:5435/postgres')
 
 engine = create_engine(DATABASE_URL)
 class Base(DeclarativeBase): pass

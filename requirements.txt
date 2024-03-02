@@ -1,0 +1,4 @@
+disnake
+configparser
+sqlalchemy
+psycopg2
