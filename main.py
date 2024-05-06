@@ -10,7 +10,7 @@ from disnake.ext import commands
 # токен
 config = configparser.ConfigParser()
 config.read('./config.ini')
-token = config.get('token', 'token')
+token = config.get('token', 'test_token')
 logger = SetLogs().logger
 
 class Bot(commands.Bot):

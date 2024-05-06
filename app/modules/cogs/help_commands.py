@@ -36,13 +36,15 @@ class Help(commands.Cog):
         embed.add_field(
             name="Другое",
             value="""**help_command** - подробное описание команд
-                    **ping** - пинг бота""",
+                    **ping** - пинг бота
+                    **convert** - конвертация видео в рабочее
+                    """,
             inline=False
         )
         embed.set_footer(text=f'Made by the_usual_god')
         await inter.response.send_message(embed=embed)
 
-    helpCommand = commands.option_enum({"contest": "contest", "role": "role", "ping": "ping"})
+    helpCommand = commands.option_enum({"contest": "contest", "role": "role", "ping": "ping", "convert": "convert"})
     @commands.slash_command(
             name='help_command',
             description='Помощь по отдельным командам бота'
@@ -104,6 +106,17 @@ class Help(commands.Cog):
                     embed.add_field(
                         name="Общее описание",
                         value="""Возвращение задержки ответа на выполнение команды от бота""",
+                        inline=False
+                    )
+                case "convert":
+                    embed.add_field(
+                        name="Общее описание",
+                        value="""При помощи данной команды идет конвертация видео в рабочее""",
+                        inline=False
+                    )
+                    embed.add_field(
+                        name="Параметры",
+                        value="""**message_id**: Id сообщения с вложением, которое необходимо конвертировать""",
                         inline=False
                     )
             embed.set_footer(text=f'Made by the_usual_god')

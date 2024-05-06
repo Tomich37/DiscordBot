@@ -12,7 +12,7 @@ class SlashCommands(commands.Cog):
 
     @commands.slash_command(
         name="ping",
-        description="Возвращает задержку бота",
+        description="Понг",
     )
     async def ping(self, inter):
         await inter.response.send_message(f"Понг! {round(self.bot.latency * 1000)}мс")
@@ -93,7 +93,44 @@ class SlashCommands(commands.Cog):
         except Exception as e:
             self.logger.error(f'Ошибка в commands/contest: {e}')
             print(f'Ошибка в commands/contest: {e}')
+
+    @commands.slash_command(
+        name="convert",
+        description="Конвертация видео",
+    )
+    async def convert(
+        self,
+        inter,
+        message_id: str,
+    ):
+        """
+            Конвертация видео в рабочее
+
+            Parameters
+            ----------
+            message_id: id на сообщение, видео которого надо сконвертировать
+        """
+        try:
+            await inter.response.defer(ephemeral=False) 
+            # Получаем объект сообщения по его ID
+            message = await inter.channel.fetch_message(int(message_id))
+
+            # Проверяем, что сообщение содержит вложения
+            if message.attachments:
+                for attachment in message.attachments:
+                    save_path = "./app/modules/temp/"
+                    await attachment.save(f"{save_path}downloaded_{attachment.filename}")
+                await self.sc.video_convert()
+                await self.sc.send_files(inter, message_id)
+            else:
+                await inter.channel.send("В этом сообщении нет вложений.")     
+
+            # Удаление уведомления о том что бот думает
+            await inter.delete_original_response()
             
+        except Exception as e:
+            self.logger.error(f'Ошибка в commands/convert: {e}')
+            print(f'Ошибка в commands/convert: {e}')
 
 def setup(bot, logger):
     bot.add_cog(SlashCommands(bot, logger))
