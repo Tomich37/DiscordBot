@@ -1,6 +1,7 @@
 import disnake
 from app.modules.database import Database
-import re
+import re, os
+from moviepy.editor import VideoFileClip
 
 class Scripts:
     def __init__(self, logger, bot) -> None:
@@ -72,3 +73,61 @@ class Scripts:
         except Exception as e:
             self.logger.error(f'Ошибка в scripts/send_embeds: {e}')
             print(f'Ошибка в scripts/send_embeds: {e}')
+    
+    # Конвертация видео
+    async def video_convert(self):
+        try:
+            # Путь к папке с видеофайлами
+            video_folder = "./app/modules/temp"
+
+            # Получаем список всех файлов в папке
+            files = os.listdir(video_folder)
+
+            # Фильтруем только видеофайлы
+            video_files = [file for file in files if file.endswith((".mp4", ".avi", ".mkv", ".MP4", ".AVI", ".MKV"))]
+
+            # Конвертируем каждый видеофайл в формат MOV
+            for video_file in video_files:
+                # Создаем объект VideoFileClip для текущего видеофайла
+                video = VideoFileClip(os.path.join(video_folder, video_file))
+                
+                # Формируем имя для сохранения MOV файла
+                output_file = os.path.splitext(video_file)[0] + ".mov"
+                
+                # Сохраняем видео в MOV формате
+                video.write_videofile(os.path.join(video_folder, output_file), codec='libx264', audio_codec='aac')
+
+                # Удаление исходников
+                os.remove(os.path.join(video_folder, video_file))            
+        except Exception as e:
+            self.logger.error(f'Ошибка в scripts/video_convert: {e}')
+            print(f'Ошибка в scripts/video_convert: {e}')
+
+    # Создание и отправка сообщения с вложениями
+    async def send_files(self, inter, message_id):
+        try:
+            video_folder = "./app/modules/temp"
+            files = os.listdir(video_folder)
+            message = await inter.channel.fetch_message(message_id)
+
+            # Создаем список для хранения объектов disnake.File
+            mp4_files = []
+
+            # Получаем список всех файлов в указанном каталоге
+            for filename in os.listdir(video_folder):
+                if filename.lower().endswith(".mov"):
+                    # Создаем объект disnake.File для каждого файла и добавляем его в список
+                    file_path = os.path.join(video_folder, filename)
+                    mp4_files.append(disnake.File(file_path))
+            
+            # Отправляем сообщение с вложениями
+            message_content = "Ваши конвертированные видео:"
+            await message.reply(content=message_content, files=mp4_files)
+
+            # Подчищаем файлы
+            for file in files:
+                file_path = os.path.join(video_folder, file)
+                os.remove(file_path)
+        except Exception as e:
+            self.logger.error(f'Ошибка в scripts/send_mp4_files: {e}')
+            print(f'Ошибка в scripts/send_mp4_files: {e}')
