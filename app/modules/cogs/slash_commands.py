@@ -1,4 +1,5 @@
 import disnake
+import disnake.ext
 from disnake.ext import commands
 from app.modules.database import Database
 from app.modules.scripts import Scripts

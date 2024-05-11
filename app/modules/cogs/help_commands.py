@@ -29,7 +29,7 @@ class Help(commands.Cog):
         )        
         embed.add_field(
             name="Модерация",
-            value="""**contest** - организация конкурса в поределенном канале
+            value="""**contest** - организация конкурса в определенном канале
 **role** - назначить / снять роль с участника""",
             inline=False
         )
