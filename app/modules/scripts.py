@@ -129,5 +129,12 @@ class Scripts:
                 file_path = os.path.join(video_folder, file)
                 os.remove(file_path)
         except Exception as e:
-            self.logger.error(f'Ошибка в scripts/send_mp4_files: {e}')
-            print(f'Ошибка в scripts/send_mp4_files: {e}')
+            await message.reply(content=f'Ошибка: {e}')
+
+            # Подчищаем файлы
+            for file in files:
+                file_path = os.path.join(video_folder, file)
+                os.remove(file_path)
+
+            self.logger.error(f'Ошибка в scripts/send_files: {e}')
+            print(f'Ошибка в scripts/send_files: {e}')

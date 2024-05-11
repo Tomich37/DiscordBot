@@ -1,4 +1,5 @@
 import disnake
+import disnake.ext
 from disnake.ext import commands
 from app.modules.database import Database
 from app.modules.scripts import Scripts
@@ -129,6 +130,8 @@ class SlashCommands(commands.Cog):
             await inter.delete_original_response()
             
         except Exception as e:
+            await inter.channel.send("Я не вижу этого сообщения")  
+            await inter.delete_original_response()
             self.logger.error(f'Ошибка в commands/convert: {e}')
             print(f'Ошибка в commands/convert: {e}')
 
