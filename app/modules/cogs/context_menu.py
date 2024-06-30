@@ -9,8 +9,8 @@ class ContextMenu(commands.Cog):
 
     @commands.message_command(name="Convert Video")
     async def say_hello(self, inter):
-        message_id = inter.data.target_id
-        try:
+        try:            
+            message_id = inter.data.target_id
             await inter.response.defer(ephemeral=False) 
             # Получаем объект сообщения по его ID
             message = await inter.channel.fetch_message(int(message_id))
@@ -29,7 +29,7 @@ class ContextMenu(commands.Cog):
             await inter.delete_original_response()
             
         except Exception as e:
-            await inter.channel.send("Я не вижу этого сообщения")  
+            await inter.channel.send("Я не вижу этого сообщения")
             await inter.delete_original_response()
             self.logger.error(f'Ошибка в commands/convert: {e}')
             print(f'Ошибка в commands/convert: {e}')
