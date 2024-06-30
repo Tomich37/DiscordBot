@@ -135,5 +135,65 @@ class SlashCommands(commands.Cog):
             self.logger.error(f'Ошибка в commands/convert: {e}')
             print(f'Ошибка в commands/convert: {e}')
 
+    statisticStatus = commands.option_enum({"Запуск сбора статистики": "start", "Завершение сбора статистики": "stop"})
+    @commands.slash_command(
+        name="add_statistic",
+        description="Статистика канала",
+    )
+    @commands.has_permissions(administrator=True, manage_roles=True)
+    async def add_statistic(
+        self,
+        inter,
+        channel: disnake.TextChannel,
+        status: statisticStatus,  
+    ):
+        """
+            Сбор статистики активности по определенному каналу
+
+            Parameters
+            ----------
+            channel_id: id на канал, который будет отслеживаться
+            status: Параметр, управляющий стартом и завершением отслеживания канала
+        """
+        try:       
+            guild_id = inter.guild.id   
+            channel_id = channel.id
+            status = True if status == 'start' else False
+
+            self.db.create_update_channel_statistic(guild_id, channel_id, bool(status))
+
+            if status:
+                await inter.send(f'Отслеживание статистики в канале <#{channel_id}> активировано.', ephemeral=False)
+            else:
+                await inter.send(f'Отслеживание статистики в канале <#{channel_id}> завершено', ephemeral=False)
+            
+        except Exception as e:
+            await inter.channel.send(f'Ошибка в commands/slash_command/add_statistic: {e}')
+            self.logger.error(f'Ошибка в commands/slash_command/add_statistic: {e}')
+            print(f'Ошибка в commands/slash_command/add_statistic: {e}')
+
+    # @commands.slash_command(
+    #     name="test",
+    #     description="Для тестовых команд",
+    # )
+    # async def test(
+    #     self,
+    #     inter,
+    # ):
+    #     """
+    #         Для тестирования команд
+    #     """
+    #     try:
+    #         await inter.response.defer(ephemeral=False)
+    #         await self.sc.send_daily_statistics()            
+    #     except Exception as e:
+    #         await inter.channel.send(f'Ошибка в commands/test: {e}')
+    #         await inter.delete_original_response()
+    #         self.logger.error(f'Ошибка в commands/test: {e}')
+    #         print(f'Ошибка в commands/test: {e}')
+
+
+
+
 def setup(bot, logger):
     bot.add_cog(SlashCommands(bot, logger))

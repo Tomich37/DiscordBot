@@ -1,11 +1,13 @@
 from app.modules.logger import SetLogs
 from app.modules.messages import Messages
+from app.modules.scripts import Scripts
 
 import configparser
 import disnake
 import os
 import importlib
 from disnake.ext import commands
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 # токен
 config = configparser.ConfigParser()
@@ -18,6 +20,17 @@ class Bot(commands.Bot):
         super().__init__(command_prefix=commands.when_mentioned_or("e!"), intents=disnake.Intents().all(),
                          case_insensitive=True, command_sync_flags=commands.CommandSyncFlags.default())
         self.logger = logger
+
+        self.scripts = Scripts(logger, self)  # Инициализация скрипта
+        self.scheduler = AsyncIOScheduler()
+        self.scheduler.add_job(
+            self.scripts.send_daily_statistics, 
+            'cron', 
+            hour=0, 
+            minute=0,
+            misfire_grace_time=60  # Задаем время в секундах, в течение которого задача все еще может быть выполнена, если пропущена
+        )
+        self.scheduler.start()
 
     async def on_ready(self):
         print(f"Logged in as {self.user}")

@@ -1,7 +1,13 @@
 import disnake
-from app.modules.database import Database
+import matplotlib.pyplot as plt
+
+from io import BytesIO
+from PIL import Image
 import re, os
 from moviepy.editor import VideoFileClip
+from datetime import date, timedelta
+
+from app.modules.database import Database
 
 class Scripts:
     def __init__(self, logger, bot) -> None:
@@ -138,3 +144,21 @@ class Scripts:
 
             self.logger.error(f'Ошибка в scripts/send_files: {e}')
             print(f'Ошибка в scripts/send_files: {e}')
+
+    #Ежедневная отправка статистики
+    async def send_daily_statistics(self):
+        try:
+            today = date.today()
+            yesterday = today - timedelta(days=1)
+            active_channels = self.db.get_all_statistics_channel() #получение активных каналов
+
+            # по каждому id активного канала
+            for channel_id in active_channels:
+                stats = self.db.get_yesterday_statistic(channel_id=channel_id, date=yesterday) # заменить дату на yesterday
+                if stats:
+                    channel_obj = self.bot.get_channel(channel_id)
+                    if channel_obj:
+                        await channel_obj.send(f"Статистика за {yesterday}: {stats.message_count} сообщений")
+        except Exception as e:
+            self.logger.error(f'Ошибка в scripts/send_daily_statistics: {e}')
+            print(f'Ошибка в scripts/send_daily_statistics: {e}')
