@@ -1,15 +1,17 @@
+import asyncio
 from app.modules.logger import SetLogs
 from app.modules.messages import Messages
 from app.modules.cogs.commands import setup as setup_commands
 
-import configparser
 import disnake
 from disnake.ext import commands
+import os
+from dotenv import load_dotenv
 
 # токен
-config = configparser.ConfigParser()
-config.read('./config.ini')
-token = config.get('token', 'token')
+load_dotenv()
+TEST_TOKEN = os.getenv('DISCORD_TEST_TOKEN')
+MAIN_TOKEN = os.getenv('DISCORD_MAIN_TOKEN')
 logger = SetLogs().logger
 
 class Bot(commands.Bot):
@@ -21,15 +23,20 @@ class Bot(commands.Bot):
     async def on_ready(self):
         print(f"Logged in as {self.user}")
         print("------")
-pybot = Bot(logger)
 
-# Обработка сообщений из чата
-@pybot.event
-async def on_message(message):
-    msg_handler = Messages(logger, pybot, message)
-    await msg_handler.process_message()
+async def main():
+    pybot = Bot(logger)
+    
+    # Обработка сообщений из чата
+    @pybot.event
+    async def on_message(message):
+        msg_handler = Messages(logger, pybot, message)
+        await msg_handler.process_message()
 
-# Обработка слэш-команд
-setup_commands(pybot, logger)
+    # Обработка слэш-команд
+    setup_commands(pybot, logger)
 
-pybot.run(token)
+    await pybot.start(TEST_TOKEN)
+
+if __name__ == "__main__":
+    asyncio.run(main())

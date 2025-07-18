@@ -2,3 +2,4 @@ disnake
 configparser
 sqlalchemy
 psycopg2
+python-dotenv

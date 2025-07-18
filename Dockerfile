@@ -1,14 +1,17 @@
 # Используем официальный образ Python
-FROM python:3.11.3
+FROM python:3.14.0b4-bookworm as builder
 
-# Устанавливаем зависимости из файла requirements.txt
-COPY requirements.txt /app/
+# Устанавливаем системные зависимости для psycopg2
+RUN sed -i 's/deb.debian.org/mirror.yandex.ru/g' /etc/apt/sources.list && \
+    apt-get update && \
+    apt-get install -y libpq-dev gcc && \
+    rm -rf /var/lib/apt/lists/*
+
+FROM python:3.14.0b4-bookworm
 WORKDIR /app
-RUN pip install --upgrade pip
-RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
 
-# Копируем код бота в контейнер
-COPY . /app
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
-# Команда для запуска бота
 CMD ["python", "main.py"]
