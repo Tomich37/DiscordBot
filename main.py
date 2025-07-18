@@ -1,18 +1,20 @@
+import asyncio
 from app.modules.logger import SetLogs
 from app.modules.messages import Messages
 from app.modules.scripts import Scripts
 
-import configparser
 import disnake
 import os
 import importlib
 from disnake.ext import commands
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+import os
+from dotenv import load_dotenv
 
 # токен
-config = configparser.ConfigParser()
-config.read('./config.ini')
-token = config.get('token', 'test_token')
+load_dotenv()
+TEST_TOKEN = os.getenv('DISCORD_TEST_TOKEN')
+MAIN_TOKEN = os.getenv('DISCORD_MAIN_TOKEN')
 logger = SetLogs().logger
 
 class Bot(commands.Bot):
@@ -35,20 +37,25 @@ class Bot(commands.Bot):
     async def on_ready(self):
         print(f"Logged in as {self.user}")
         print("------")
-pybot = Bot(logger)
 
-# Обработка сообщений из чата
-@pybot.event
-async def on_message(message):
-    msg_handler = Messages(logger, pybot, message)
-    await msg_handler.process_message()
+async def main():
+    pybot = Bot(logger)
+    
+    # Обработка сообщений из чата
+    @pybot.event
+    async def on_message(message):
+        msg_handler = Messages(logger, pybot, message)
+        await msg_handler.process_message()
 
-cogs_dir = "./app/modules/cogs"
-# Обработка слэш-команд
-for file in os.listdir(cogs_dir):
-    if file.endswith(".py"):
-        module_name = f"app.modules.cogs.{file[:-3]}"
-        cog = importlib.import_module(module_name)
-        cog.setup(pybot, logger)
+    cogs_dir = "./app/modules/cogs"
+    # Обработка слэш-команд
+    for file in os.listdir(cogs_dir):
+        if file.endswith(".py"):
+            module_name = f"app.modules.cogs.{file[:-3]}"
+            cog = importlib.import_module(module_name)
+            cog.setup(pybot, logger)
 
-pybot.run(token)
+    await pybot.start(TEST_TOKEN)
+
+if __name__ == "__main__":
+    asyncio.run(main())

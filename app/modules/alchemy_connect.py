@@ -1,10 +1,11 @@
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy import create_engine, Column, Integer, String, Boolean, BigInteger, Date, ForeignKey
-import configparser
+import os
+from dotenv import load_dotenv
 
-config = configparser.ConfigParser()
-config.read('./config.ini')
-DATABASE_URL = config.get('pg', 'URI')
+load_dotenv()
+
+DATABASE_URL = os.getenv('DATABASE_URL')
 
 engine = create_engine(DATABASE_URL)
 Base = declarative_base()
@@ -30,6 +31,13 @@ class MessageStatistics(Base):
     channel_id = Column(BigInteger, ForeignKey('tracked_channels.channel_id'), nullable=False)
     date = Column(Date, nullable=False)
     message_count = Column(Integer, default=0)
+
+class Recruitments(Base):
+    __tablename__ = "recruitments"
+    id = Column(Integer, primary_key=True, index=True)
+    guild_id = Column(BigInteger)
+    channel_id = Column(BigInteger,)
+    message_id = Column(BigInteger,)
   
 # создаем таблицы
 Base.metadata.create_all(bind=engine)
