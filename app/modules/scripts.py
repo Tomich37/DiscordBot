@@ -1,6 +1,13 @@
 import disnake
+import matplotlib.pyplot as plt
+
+from io import BytesIO
+from PIL import Image
+import re, os
+from moviepy.editor import VideoFileClip
+from datetime import date, timedelta
+
 from app.modules.database import Database
-import re
 
 class Scripts:
     def __init__(self, logger, bot) -> None:
@@ -13,7 +20,7 @@ class Scripts:
     async def read_messages_with_reaction(self, channel_id, emoji, inter):
         try:
             channel = self.bot.get_channel(channel_id)
-            match = re.match(r'<:(\w+):(\d+)>', emoji)
+            match = re.match(r'<a?:(\w+):(\d+)>', emoji)
             if match:
                 name = match.group(1)
                 emoji_id = int(match.group(2))
@@ -72,3 +79,86 @@ class Scripts:
         except Exception as e:
             self.logger.error(f'Ошибка в scripts/send_embeds: {e}')
             print(f'Ошибка в scripts/send_embeds: {e}')
+    
+    # Конвертация видео
+    async def video_convert(self):
+        try:
+            # Путь к папке с видеофайлами
+            video_folder = "./app/modules/temp"
+
+            # Получаем список всех файлов в папке
+            files = os.listdir(video_folder)
+
+            # Фильтруем только видеофайлы
+            video_files = [file for file in files if file.endswith((".mp4", ".avi", ".mkv", ".MP4", ".AVI", ".MKV"))]
+
+            # Конвертируем каждый видеофайл в формат MOV
+            for video_file in video_files:
+                # Создаем объект VideoFileClip для текущего видеофайла
+                video = VideoFileClip(os.path.join(video_folder, video_file))
+                
+                # Формируем имя для сохранения MOV файла
+                output_file = os.path.splitext(video_file)[0] + ".mov"
+                
+                # Сохраняем видео в MOV формате
+                video.write_videofile(os.path.join(video_folder, output_file), codec='libx264', audio_codec='aac')
+
+                # Удаление исходников
+                os.remove(os.path.join(video_folder, video_file))            
+        except Exception as e:
+            self.logger.error(f'Ошибка в scripts/video_convert: {e}')
+            print(f'Ошибка в scripts/video_convert: {e}')
+
+    # Создание и отправка сообщения с вложениями
+    async def send_files(self, inter, message_id):
+        try:
+            video_folder = "./app/modules/temp"
+            files = os.listdir(video_folder)
+            message = await inter.channel.fetch_message(message_id)
+
+            # Создаем список для хранения объектов disnake.File
+            mp4_files = []
+
+            # Получаем список всех файлов в указанном каталоге
+            for filename in os.listdir(video_folder):
+                if filename.lower().endswith(".mov"):
+                    # Создаем объект disnake.File для каждого файла и добавляем его в список
+                    file_path = os.path.join(video_folder, filename)
+                    mp4_files.append(disnake.File(file_path))
+            
+            # Отправляем сообщение с вложениями
+            message_content = "Ваши конвертированные видео:"
+            await message.reply(content=message_content, files=mp4_files)
+
+            # Подчищаем файлы
+            for file in files:
+                file_path = os.path.join(video_folder, file)
+                os.remove(file_path)
+        except Exception as e:
+            await message.reply(content=f'Ошибка: {e}')
+
+            # Подчищаем файлы
+            for file in files:
+                file_path = os.path.join(video_folder, file)
+                os.remove(file_path)
+
+            self.logger.error(f'Ошибка в scripts/send_files: {e}')
+            print(f'Ошибка в scripts/send_files: {e}')
+
+    #Ежедневная отправка статистики
+    async def send_daily_statistics(self):
+        try:
+            today = date.today()
+            yesterday = today - timedelta(days=1)
+            active_channels = self.db.get_all_statistics_channel() #получение активных каналов
+
+            # по каждому id активного канала
+            for channel_id in active_channels:
+                stats = self.db.get_yesterday_statistic(channel_id=channel_id, date=yesterday) # заменить дату на yesterday
+                if stats:
+                    channel_obj = self.bot.get_channel(channel_id)
+                    if channel_obj:
+                        await channel_obj.send(f"Статистика за {yesterday}: {stats.message_count} сообщений")
+        except Exception as e:
+            self.logger.error(f'Ошибка в scripts/send_daily_statistics: {e}')
+            print(f'Ошибка в scripts/send_daily_statistics: {e}')
