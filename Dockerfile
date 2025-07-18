@@ -1,13 +1,18 @@
 # Используем официальный образ Python
-FROM python:3.14.0b4-bookworm as builder
+FROM python:3.13.5-bookworm as builder
 
 # Устанавливаем системные зависимости для psycopg2
 RUN sed -i 's/deb.debian.org/mirror.yandex.ru/g' /etc/apt/sources.list && \
     apt-get update && \
-    apt-get install -y libpq-dev gcc && \
+    apt-get install -y \
+        libpq-dev \
+        gcc \
+        ffmpeg \
+        libsm6 \
+        libxext6 && \
     rm -rf /var/lib/apt/lists/*
 
-FROM python:3.14.0b4-bookworm
+FROM python:3.13.5-bookworm
 WORKDIR /app
 COPY . .
 

@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from io import BytesIO
 from PIL import Image
 import re, os
-from moviepy.editor import VideoFileClip
+from moviepy import VideoFileClip
 from datetime import date, timedelta
 
 from app.modules.database import Database
