@@ -1,4 +1,4 @@
-from app.modules.alchemy_connect import Session, engine, Contests, TrackedChannel, MessageStatistics, Recruitments
+from app.modules.alchemy_connect import Session, engine, Contests, TrackedChannel, MessageStatistics, Recruitments, TrackedAnonimusChannel
 
 class Database():
     def create_update_contest(self, guild_id: int, channel_id: int, emoji_str: str, status: bool):
@@ -89,3 +89,24 @@ class Database():
         with Session(autoflush=False, bind=engine) as db:
             recruitment = db.query(Recruitments).filter_by(guild_id=guild_id).first()
             return recruitment
+        
+    # Обновление статуса отслеживания канала
+    def create_update_channel_anonimus(self, guild_id: int, channel_id: int, status: bool):
+        with Session(autoflush=False, bind=engine) as db:
+            # Проверяем, существует ли запись с заданными guild_id и channel_id
+            existing_channel = db.query(TrackedAnonimusChannel).filter_by(guild_id=guild_id, channel_id=channel_id).first()
+
+            if existing_channel:
+                # Обновление статуса отслеживания
+                existing_channel.is_active = status
+            else:
+                # Если запись не существует, создаем новую
+                statistic = TrackedAnonimusChannel(guild_id=guild_id, channel_id=channel_id, is_active=status)
+                db.add(statistic)
+            db.commit()
+
+    # Получение всех отслеживаемых каналов для статистики
+    def get_all_anonimus_channel(self):
+        with Session(autoflush=False, bind=engine) as db:
+            channels = db.query(TrackedAnonimusChannel).filter_by(is_active=True).all()
+            return [channel.channel_id for channel in channels]
