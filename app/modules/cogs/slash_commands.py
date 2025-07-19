@@ -172,6 +172,86 @@ class SlashCommands(commands.Cog):
             self.logger.error(f'Ошибка в commands/slash_command/add_statistic: {e}')
             print(f'Ошибка в commands/slash_command/add_statistic: {e}')
 
+    channelAnonimusMenegment = commands.option_enum({"Добавить канал": "add", "Удалить канал": "del"})  
+    @commands.slash_command(
+        name="add_anonimus_channel",
+        description="Добавить/удалить канал из списка разрешенных для анонимных сообщений",
+    )
+    @commands.has_permissions(administrator=True)
+    async def add_anonimus_channel(
+        self, 
+        inter: disnake.GuildCommandInteraction,
+        channel: disnake.TextChannel,     
+        action: channelAnonimusMenegment,
+    ):
+        """
+            Назначение роли участнику сервера
+
+            Parameters
+            ----------
+            channel: Выберите канал для редактирования прав
+            action: Выдать или забрать право на публикацию анонимных сообщений
+        """
+        try:       
+            guild_id = inter.guild.id   
+            channel_id = channel.id
+            action = True if action == 'add' else False
+
+            self.db.create_update_channel_anonimus(guild_id, channel_id, bool(action))
+
+            if action:
+                await inter.send(f'Анонимные сообщения в канале <#{channel_id}> активированы.', ephemeral=False)
+            else:
+                await inter.send(f'Анонимные сообщения в канале <#{channel_id}> выключены', ephemeral=False)
+            
+        except Exception as e:
+            await inter.channel.send(f'Ошибка в commands/slash_command/channelAnonimus: {e}')
+            self.logger.error(f'Ошибка в commands/slash_command/channelAnonimus: {e}')
+            print(f'Ошибка в commands/slash_command/channelAnonimus: {e}')
+
+    @commands.slash_command(
+        name="anonimuska",
+        description="Отправить анонимное сообщение в этом канале",
+    )
+    async def send_anonimus_channel(
+        self, 
+        inter: disnake.GuildCommandInteraction,
+        message: str,
+    ):
+        """
+            Отправка анонимного сообщения в этом канале
+
+            Parameters
+            ----------
+            message: Вевдите сообщение
+        """
+        try:
+            channel_id = inter.channel.id
+            anonimus_channels = self.db.get_all_anonimus_channel()
+
+            if channel_id not in anonimus_channels:
+                return await inter.response.send_message(
+                    "Данный канал не поддерживает анонимные сообщения",
+                    ephemeral=True
+                )      
+            
+            # Сначала отвечаем на interaction
+            await inter.response.defer(ephemeral=True)            
+            # Отправляем анонимное сообщение
+            await inter.channel.send(message)     
+            # Удаляем оригинальный ответ "бот думает"
+            await inter.delete_original_response()
+
+            self.logger.info(
+                f"Анонимное сообщение от {inter.author} (ID: {inter.author.id}) "
+                f"в канале {inter.channel} (ID: {channel_id}): {message[:100]}"
+            )
+
+        except Exception as e:
+            await inter.channel.send(f'Ошибка в commands/slash_command/send_anonimus_channel: {e}')
+            self.logger.error(f'Ошибка в commands/slash_command/send_anonimus_channel: {e}')
+            print(f'Ошибка в commands/slash_command/send_anonimus_channel: {e}')
+
     # @commands.slash_command(
     #     name="test",
     #     description="Для тестовых команд",

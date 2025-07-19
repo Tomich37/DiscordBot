@@ -12,6 +12,11 @@ services:
     networks:
       - discord_network
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   emilia-bot:
     build: .
@@ -19,7 +24,8 @@ services:
       DISCORD_TOKEN: ${DISCORD_MAIN_TOKEN}
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@emilia-db:5432/${POSTGRES_DB}
     depends_on:
-      - emilia-db
+      emilia-db:
+        condition: service_healthy
     networks:
       - discord_network
     restart: unless-stopped
