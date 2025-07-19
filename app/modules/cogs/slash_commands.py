@@ -223,7 +223,7 @@ class SlashCommands(commands.Cog):
 
             Parameters
             ----------
-            message: Вевдите сообщение
+            message: Введите сообщение
         """
         try:
             channel_id = inter.channel.id
@@ -233,24 +233,37 @@ class SlashCommands(commands.Cog):
                 return await inter.response.send_message(
                     "Данный канал не поддерживает анонимные сообщения",
                     ephemeral=True
-                )      
+                )
             
-            # Сначала отвечаем на interaction
-            await inter.response.defer(ephemeral=True)            
-            # Отправляем анонимное сообщение
-            await inter.channel.send(message)     
-            # Удаляем оригинальный ответ "бот думает"
+            # Создаём эмбед
+            embed = disnake.Embed(
+                title="Анонимуська",
+                description=message[:4096],
+                color=0x00008B
+            )
+            embed.set_author(
+                name="Emiliabot",
+                url="https://discord.com/api/oauth2/authorize?client_id=602393416017379328&permissions=8&scope=bot+applications.commands",
+                icon_url="https://media.discordapp.net/attachments/1186903406196047954/1186903657904623637/avatar_2.png",
+            )
+            embed.set_footer(text="Made by the_usual_god")
+
+            # Отправляем эмбед в канал
+            await inter.response.defer(ephemeral=True)   
+            await inter.channel.send(embed=embed)
             await inter.delete_original_response()
 
+            # Логируем действие
             self.logger.info(
                 f"Анонимное сообщение от {inter.author} (ID: {inter.author.id}) "
                 f"в канале {inter.channel} (ID: {channel_id}): {message[:100]}"
             )
 
         except Exception as e:
-            await inter.channel.send(f'Ошибка в commands/slash_command/send_anonimus_channel: {e}')
-            self.logger.error(f'Ошибка в commands/slash_command/send_anonimus_channel: {e}')
-            print(f'Ошибка в commands/slash_command/send_anonimus_channel: {e}')
+            error_msg = f"Ошибка при отправке анонимного сообщения: {e}"
+            await inter.response.send_message(error_msg, ephemeral=True)  # Уведомляем автора
+            self.logger.error(f"Ошибка в commands/slash_command/send_anonimus_channel: {e}")
+            print(error_msg)
 
     # @commands.slash_command(
     #     name="test",
