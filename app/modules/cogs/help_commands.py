@@ -30,20 +30,28 @@ class Help(commands.Cog):
         embed.add_field(
             name="Модерация",
             value="""**contest** - организация конкурса в определенном канале
-**role** - назначить / снять роль с участника""",
+**role** - назначить / снять роль с участника
+**add_anonimus_channel** - включить/выключить анонимные сообщения в канале""",
             inline=False
         )
         embed.add_field(
             name="Другое",
             value="""**help_command** - подробное описание команд
 **ping** - пинг бота
-**convert** - конвертация видео в рабочее""",
+**convert** - конвертация видео в рабочее
+**anonimuska** - отправить сообщение от лица бота""",
             inline=False
         )
         embed.set_footer(text=f'Made by the_usual_god')
         await inter.response.send_message(embed=embed)
 
-    helpCommand = commands.option_enum({"contest": "contest", "role": "role", "ping": "ping", "convert": "convert"})
+    helpCommand = commands.option_enum({
+        "contest": "contest", 
+        "role": "role", 
+        "ping": "ping", 
+        "convert": "convert", 
+        "add_anonimus_channel": "add_anonimus_channel",
+        "anonimuska": "anonimuska"})
     @commands.slash_command(
             name='help_command',
             description='Помощь по отдельным командам бота'
@@ -116,6 +124,29 @@ class Help(commands.Cog):
                     embed.add_field(
                         name="Параметры",
                         value="""**message_id**: Id сообщения с вложением, которое необходимо конвертировать""",
+                        inline=False
+                    )
+                case "add_anonimus_channel":
+                    embed.add_field(
+                        name="Общее описание",
+                        value="""При помощи данной команды можно разрешить или запретить отправлять анаонимные (от лица бота) сообщения. По умолчанию выкл""",
+                        inline=False
+                    )
+                    embed.add_field(
+                        name="Параметры",
+                        value="""**channel**: Выбор канала
+**action**: Выбор включить или отключить возможность отправлять сообщения""",
+                        inline=False
+                    )
+                case "anonimuska":
+                    embed.add_field(
+                        name="Общее описание",
+                        value="""При помощи данной команды можно отправить анонимное сообщение (от лица бта) в канал, где эта команды была вызвана""",
+                        inline=False
+                    )
+                    embed.add_field(
+                        name="Параметры",
+                        value="""**message**: Сообщение, которое будет отправлено в канал""",
                         inline=False
                     )
             embed.set_footer(text=f'Made by the_usual_god')
