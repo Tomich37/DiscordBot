@@ -55,7 +55,7 @@ async def main():
             cog = importlib.import_module(module_name)
             cog.setup(pybot, logger)
 
-    await pybot.start(TEST_TOKEN)
+    await pybot.start(MAIN_TOKEN)
 
 if __name__ == "__main__":
     asyncio.run(main())
