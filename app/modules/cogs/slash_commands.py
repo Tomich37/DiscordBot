@@ -103,6 +103,7 @@ class SlashCommands(commands.Cog):
         self,
         inter,
         message_id: str,
+        channel: disnake.TextChannel = None
     ):
         """
             Конвертация видео в рабочее
@@ -110,27 +111,31 @@ class SlashCommands(commands.Cog):
             Parameters
             ----------
             message_id: id на сообщение, видео которого надо сконвертировать
+            channel: канал, где находится сообщение (если не указан, ищет в текущем)
         """
         try:
             await inter.response.defer(ephemeral=False) 
+            
+            # Определяем канал для поиска
+            target_channel = channel if channel else inter.channel
+            
             # Получаем объект сообщения по его ID
-            message = await inter.channel.fetch_message(int(message_id))
+            message = await target_channel.fetch_message(int(message_id))
 
             # Проверяем, что сообщение содержит вложения
             if message.attachments:
+                save_path = "./app/modules/temp/"
                 for attachment in message.attachments:
-                    save_path = "./app/modules/temp/"
                     await attachment.save(f"{save_path}downloaded_{attachment.filename}")
                 await self.sc.video_convert()
-                await self.sc.send_files(inter, message_id)
+                await self.sc.send_files(inter)
             else:
-                await inter.channel.send("В этом сообщении нет вложений.")     
-
-            # Удаление уведомления о том что бот думает
+                await inter.followup.send("В этом сообщении нет вложений.")     
+        except disnake.NotFound:
+            await inter.followup.send("Сообщение не найдено. Убедитесь, что вы указали правильный ID и канал.")
             await inter.delete_original_response()
-            
         except Exception as e:
-            await inter.channel.send("Я не вижу этого сообщения")  
+            await inter.followup.send(f"Произошла ошибка: {str(e)}")
             await inter.delete_original_response()
             self.logger.error(f'Ошибка в commands/convert: {e}')
             print(f'Ошибка в commands/convert: {e}')

@@ -86,35 +86,47 @@ class Scripts:
             # Путь к папке с видеофайлами
             video_folder = "./app/modules/temp"
 
+            # Создаем папку, если она не существует
+            os.makedirs(video_folder, exist_ok=True)
+
             # Получаем список всех файлов в папке
             files = os.listdir(video_folder)
 
             # Фильтруем только видеофайлы
-            video_files = [file for file in files if file.endswith((".mp4", ".avi", ".mkv", ".MP4", ".AVI", ".MKV"))]
+            video_files = [file for file in files if file.lower().endswith((".mp4", ".avi", ".mkv"))]
 
             # Конвертируем каждый видеофайл в формат MOV
             for video_file in video_files:
-                # Создаем объект VideoFileClip для текущего видеофайла
-                video = VideoFileClip(os.path.join(video_folder, video_file))
-                
-                # Формируем имя для сохранения MOV файла
+                input_path = os.path.join(video_folder, video_file)
                 output_file = os.path.splitext(video_file)[0] + ".mov"
+                output_path = os.path.join(video_folder, output_file)
                 
-                # Сохраняем видео в MOV формате
-                video.write_videofile(os.path.join(video_folder, output_file), codec='libx264', audio_codec='aac')
-
-                # Удаление исходников
-                os.remove(os.path.join(video_folder, video_file))            
+                try:
+                    # Создаем объект VideoFileClip для текущего видеофайла
+                    with VideoFileClip(input_path) as video:
+                        # Сохраняем видео в MOV формате
+                        video.write_videofile(
+                            output_path,
+                            codec='libx264',
+                            audio_codec='aac'
+                        )
+                    
+                    # Удаление исходников
+                    os.remove(input_path)
+                    print(f"Успешно конвертировано: {video_file} -> {output_file}")
+                    
+                except Exception as clip_error:
+                    print(f"Ошибка при обработке файла {video_file}: {str(clip_error)}")
+                    continue      
         except Exception as e:
             self.logger.error(f'Ошибка в scripts/video_convert: {e}')
             print(f'Ошибка в scripts/video_convert: {e}')
 
     # Создание и отправка сообщения с вложениями
-    async def send_files(self, inter, message_id):
+    async def send_files(self, inter):
         try:
             video_folder = "./app/modules/temp"
             files = os.listdir(video_folder)
-            message = await inter.channel.fetch_message(message_id)
 
             # Создаем список для хранения объектов disnake.File
             mp4_files = []
@@ -122,25 +134,28 @@ class Scripts:
             # Получаем список всех файлов в указанном каталоге
             for filename in os.listdir(video_folder):
                 if filename.lower().endswith(".mov"):
-                    # Создаем объект disnake.File для каждого файла и добавляем его в список
                     file_path = os.path.join(video_folder, filename)
                     mp4_files.append(disnake.File(file_path))
             
             # Отправляем сообщение с вложениями
-            message_content = "Ваши конвертированные видео:"
-            await message.reply(content=message_content, files=mp4_files)
+            await inter.followup.send(
+                content=f"{inter.author.mention}, ваши конвертированные видео:",
+                files=mp4_files
+            )
 
             # Подчищаем файлы
             for file in files:
                 file_path = os.path.join(video_folder, file)
-                os.remove(file_path)
+                if os.path.exists(file_path):
+                    os.remove(file_path)
         except Exception as e:
-            await message.reply(content=f'Ошибка: {e}')
+            await inter.followup.send(content=f'Ошибка: {e}')
 
             # Подчищаем файлы
             for file in files:
                 file_path = os.path.join(video_folder, file)
-                os.remove(file_path)
+                if os.path.exists(file_path):
+                    os.remove(file_path)
 
             self.logger.error(f'Ошибка в scripts/send_files: {e}')
             print(f'Ошибка в scripts/send_files: {e}')
