@@ -82,7 +82,7 @@ async def main():
         await msg_handler.process_message()
 
     await load_cogs(pybot)
-    await pybot.start(TEST_TOKEN)
+    await pybot.start(MAIN_TOKEN)
 
 if __name__ == "__main__":
     asyncio.run(main())
