@@ -7,12 +7,12 @@ class VoiceScripts:
         self.bot = bot
 
     async def connect_to_requester_channel(self, inter: disnake.GuildCommandInteraction):
-        """Connect the bot to the same voice channel as the interaction author."""
+        """Подключить бота к голосовому каналу пользователя."""
         voice_state = getattr(inter.author, "voice", None)
         if not voice_state or not voice_state.channel:
             return await self._send_response(
                 inter,
-                "Join a voice channel first so I know where to connect."
+                "Сначала зайди в голосовой канал, чтобы я знала куда подключаться."
             )
 
         channel = voice_state.channel
@@ -20,7 +20,7 @@ class VoiceScripts:
         if guild is None:
             return await self._send_response(
                 inter,
-                "This command only works inside a server."
+                "Эта команда работает только на сервере."
             )
 
         voice_client = guild.voice_client
@@ -29,7 +29,7 @@ class VoiceScripts:
             if voice_client and voice_client.channel.id == channel.id:
                 return await self._send_response(
                     inter,
-                    f"I'm already in {channel.mention}."
+                    f"Я уже в {channel.mention}."
                 )
 
             if voice_client:
@@ -39,31 +39,31 @@ class VoiceScripts:
 
             await self._send_response(
                 inter,
-                f"Connected to {channel.mention}."
+                f"Подключилась к {channel.mention}."
             )
         except RuntimeError as runtime_error:
             await self._send_response(
                 inter,
-                "Voice support requires the PyNaCl package on the bot host."
+                "Для работы с голосовыми каналами нужна библиотека PyNaCl на стороне бота."
             )
-            self.logger.error("PyNaCl missing for voice connection: %s", runtime_error)
+            self.logger.error("Отсутствует PyNaCl для подключения к голосу: %s", runtime_error)
         except disnake.Forbidden:
             await self._send_response(
                 inter,
-                "I don't have permission to connect to that voice channel."
+                "У меня нет прав для подключения к этому голосовому каналу."
             )
             self.logger.warning(
-                "Missing permission to connect to voice channel %s (%s)",
+                "Недостаточно прав для подключения к голосовому каналу %s (%s)",
                 channel.name,
                 channel.id,
             )
         except disnake.ClientException as client_error:
             await self._send_response(
                 inter,
-                "I couldn't connect right now, please try again."
+                "Сейчас не получается подключиться, попробуй ещё раз."
             )
             self.logger.error(
-                "ClientException while joining channel %s (%s): %s",
+                "ClientException при подключении к каналу %s (%s): %s",
                 channel.name,
                 channel.id,
                 client_error,
@@ -71,61 +71,61 @@ class VoiceScripts:
         except Exception as error:
             await self._send_response(
                 inter,
-                "Something unexpected happened while connecting."
+                "При подключении произошла неожиданная ошибка."
             )
             self.logger.error(
-                "Unexpected error while joining channel %s (%s): %s",
-                channel.name if channel else "unknown",
-                channel.id if channel else "unknown",
+                "Неожиданная ошибка при подключении к каналу %s (%s): %s",
+                channel.name if channel else "неизвестно",
+                channel.id if channel else "неизвестно",
                 error,
             )
 
     async def disconnect_with_requester(self, inter: disnake.GuildCommandInteraction):
-        """Disconnect the bot if the requester shares the current voice channel."""
+        """Отключить бота, если пользователь находится в том же голосовом канале."""
         voice_state = getattr(inter.author, "voice", None)
         if not voice_state or not voice_state.channel:
             return await self._send_response(
                 inter,
-                "Join the voice channel with me first to disconnect the bot."
+                "Сначала зайди в голосовой канал со мной, чтобы отключить бота."
             )
 
         guild = inter.guild
         if guild is None:
-            return await self._send_response(inter, "This command is only available inside a server.")
+            return await self._send_response(inter, "Эта команда доступна только на сервере.")
 
         voice_client = guild.voice_client
         if not voice_client or not voice_client.channel:
-            return await self._send_response(inter, "I'm not connected to any voice channel right now.")
+            return await self._send_response(inter, "Я сейчас не подключена ни к одному голосовому каналу.")
 
         if voice_client.channel.id != voice_state.channel.id:
             return await self._send_response(
                 inter,
-                f"You need to be in {voice_client.channel.mention} to disconnect me."
+                f"Нужно зайти в {voice_client.channel.mention}, чтобы отключить меня."
             )
 
         try:
             channel = voice_client.channel
             await voice_client.disconnect(force=True)
-            await self._send_response(inter, f"Disconnected from {channel.mention}.")
+            await self._send_response(inter, f"Отключилась от {channel.mention}.")
         except disnake.ClientException as client_error:
-            await self._send_response(inter, "I couldn't disconnect right now, please try again.")
+            await self._send_response(inter, "Сейчас не получается отключиться, попробуй ещё раз.")
             self.logger.error(
-                "ClientException while disconnecting from channel %s (%s): %s",
+                "ClientException при отключении от канала %s (%s): %s",
                 voice_client.channel.name,
                 voice_client.channel.id,
                 client_error,
             )
         except Exception as error:
-            await self._send_response(inter, "Something unexpected happened while disconnecting.")
+            await self._send_response(inter, "При отключении произошла неожиданная ошибка.")
             self.logger.error(
-                "Unexpected error while disconnecting from channel %s (%s): %s",
-                voice_client.channel.name if voice_client and voice_client.channel else "unknown",
-                voice_client.channel.id if voice_client and voice_client.channel else "unknown",
+                "Неожиданная ошибка при отключении от канала %s (%s): %s",
+                voice_client.channel.name if voice_client and voice_client.channel else "неизвестно",
+                voice_client.channel.id if voice_client and voice_client.channel else "неизвестно",
                 error,
             )
 
     async def _send_response(self, inter: disnake.GuildCommandInteraction, message: str):
-        """Send a response or followup depending on whether the interaction has been answered."""
+        """Отправить ответ или follow-up в зависимости от состояния взаимодействия."""
         if inter.response.is_done():
             await inter.followup.send(message, ephemeral=True)
         else:

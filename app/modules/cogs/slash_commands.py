@@ -22,7 +22,7 @@ class SlashCommands(commands.Cog):
 
     @commands.slash_command(
         name="connect",
-        description="Connect the bot to your current voice channel.",
+        description="Подключить бота к твоему текущему голосовому каналу.",
     )
     async def connect(self, inter: disnake.GuildCommandInteraction):
         await inter.response.defer(ephemeral=True)
@@ -30,7 +30,7 @@ class SlashCommands(commands.Cog):
 
     @commands.slash_command(
         name="disconnect",
-        description="Disconnect the bot if you share its current voice channel.",
+        description="Отключить бота, если ты находишься в том же голосовом канале.",
     )
     async def disconnect(self, inter: disnake.GuildCommandInteraction):
         await inter.response.defer(ephemeral=True)
