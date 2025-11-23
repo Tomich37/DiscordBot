@@ -21,12 +21,9 @@ class ContextMenu(commands.Cog):
                     save_path = "./app/modules/temp/"
                     await attachment.save(f"{save_path}downloaded_{attachment.filename}")
                 await self.sc.video_convert()
-                await self.sc.send_files(inter, message_id)
+                await self.sc.send_files(inter)
             else:
-                await inter.channel.send("В этом сообщении нет вложений.")     
-
-            # Удаление уведомления о том что бот думает
-            await inter.delete_original_response()
+                await inter.channel.send("В этом сообщении нет вложений.")
             
         except Exception as e:
             await inter.channel.send("Я не вижу этого сообщения")

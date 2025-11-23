@@ -15,6 +15,8 @@ class Scripts:
         self.bot = bot
         self.db = Database
         self.all_messages = {}
+        self._temp_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "temp")
+        os.makedirs(self._temp_dir, exist_ok=True)
 
     # Считывание сообщений и сортировка по реакции
     async def read_messages_with_reaction(self, channel_id, emoji, inter):
@@ -84,7 +86,7 @@ class Scripts:
     async def video_convert(self):
         try:
             # Путь к папке с видеофайлами
-            video_folder = "./app/modules/temp"
+            video_folder = self._temp_dir
 
             # Создаем папку, если она не существует
             os.makedirs(video_folder, exist_ok=True)
@@ -125,7 +127,7 @@ class Scripts:
     # Создание и отправка сообщения с вложениями
     async def send_files(self, inter):
         try:
-            video_folder = "./app/modules/temp"
+            video_folder = self._temp_dir
             files = os.listdir(video_folder)
 
             # Создаем список для хранения объектов disnake.File
