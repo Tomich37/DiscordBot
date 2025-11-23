@@ -1,8 +1,9 @@
-import disnake
+﻿import disnake
 import disnake.ext
 from disnake.ext import commands
 from app.modules.database import Database
 from app.modules.scripts import Scripts
+from app.modules.voice import VoiceScripts
 
 class SlashCommands(commands.Cog):
     def __init__(self, bot, logger):
@@ -10,6 +11,7 @@ class SlashCommands(commands.Cog):
         self.logger = logger
         self.db= Database()
         self.sc = Scripts(logger, bot)
+        self.voice_scripts = VoiceScripts(logger, bot)
 
     @commands.slash_command(
         name="ping",
@@ -17,6 +19,22 @@ class SlashCommands(commands.Cog):
     )
     async def ping(self, inter):
         await inter.response.send_message(f"Понг! {round(self.bot.latency * 1000)}мс")
+
+    @commands.slash_command(
+        name="connect",
+        description="Connect the bot to your current voice channel.",
+    )
+    async def connect(self, inter: disnake.GuildCommandInteraction):
+        await inter.response.defer(ephemeral=True)
+        await self.voice_scripts.connect_to_requester_channel(inter)
+
+    @commands.slash_command(
+        name="disconnect",
+        description="Disconnect the bot if you share its current voice channel.",
+    )
+    async def disconnect(self, inter: disnake.GuildCommandInteraction):
+        await inter.response.defer(ephemeral=True)
+        await self.voice_scripts.disconnect_with_requester(inter)
 
     roleMenegment = commands.option_enum({"Назначить роль": "add", "Снять роль": "take"})  
     @commands.slash_command(

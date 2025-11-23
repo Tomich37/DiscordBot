@@ -6,3 +6,4 @@ python-dotenv
 matplotlib
 moviepy
 apscheduler
+pynacl
