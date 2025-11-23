@@ -7,3 +7,5 @@ matplotlib
 moviepy
 apscheduler
 pynacl
+bgutil-ytdlp-pot-provider
+yt-dlp

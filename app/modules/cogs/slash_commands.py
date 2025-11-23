@@ -36,6 +36,28 @@ class SlashCommands(commands.Cog):
         await inter.response.defer(ephemeral=True)
         await self.voice_scripts.disconnect_with_requester(inter)
 
+    @commands.slash_command(
+        name="play",
+        description="Проигрывает звук по ссылке и добавляет в очередь.",
+    )
+    async def play(self, inter: disnake.GuildCommandInteraction, url: str):
+        await inter.response.defer(ephemeral=False)
+        await self.voice_scripts.play_url(inter, url)
+
+    @commands.slash_command(
+        name="stop",
+        description="Остановить воспроизведение и очистить очередь.",
+    )
+    async def stop(self, inter: disnake.GuildCommandInteraction):
+        await self.voice_scripts.stop_playback(inter)
+
+    @commands.slash_command(
+        name="pause",
+        description="Поставить текущий трек на паузу.",
+    )
+    async def pause(self, inter: disnake.GuildCommandInteraction):
+        await self.voice_scripts.pause_playback(inter)
+
     roleMenegment = commands.option_enum({"Назначить роль": "add", "Снять роль": "take"})  
     @commands.slash_command(
         name="role",

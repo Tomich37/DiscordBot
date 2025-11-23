@@ -4,3 +4,4 @@ config.ini
 **/logs
 venv
 *.service
+youtube_cookies.txt

@@ -23,14 +23,29 @@ services:
     environment:
       DISCORD_TOKEN: ${DISCORD_MAIN_TOKEN}
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@emilia-db:5432/${POSTGRES_DB}
+      YT_POT_PROVIDER_URL: http://bgutil-pot-provider:4416
+      YT_COOKIES_FILE: /app/youtube_cookies.txt
     depends_on:
       emilia-db:
         condition: service_healthy
+      bgutil-pot-provider:
+        condition: service_started
     networks:
       - discord_network
     restart: unless-stopped
     stdin_open: true
     tty: true
+    volumes:
+      - ./youtube_cookies.txt:/app/youtube_cookies.txt:ro
+
+  bgutil-pot-provider:
+    image: brainicism/bgutil-ytdlp-pot-provider:latest
+    container_name: bgutil-pot-provider
+    ports:
+      - "4416:4416"
+    networks:
+      - discord_network
+    restart: unless-stopped
 
 volumes:
   pg_data:

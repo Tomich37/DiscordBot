@@ -1,4 +1,4 @@
-from app.modules.alchemy_connect import Session, engine, Contests, TrackedChannel, MessageStatistics, Recruitments, TrackedAnonimusChannel
+from app.modules.alchemy_connect import Session, engine, Contests, TrackedChannel, MessageStatistics, Recruitments, TrackedAnonimusChannel, MusicQueue
 
 class Database():
     def create_update_contest(self, guild_id: int, channel_id: int, emoji_str: str, status: bool):
@@ -110,3 +110,42 @@ class Database():
         with Session(autoflush=False, bind=engine) as db:
             channels = db.query(TrackedAnonimusChannel).filter_by(is_active=True).all()
             return [channel.channel_id for channel in channels]
+
+    # Музыкальная очередь
+    def add_tracks_to_queue(self, guild_id: int, tracks: list[dict]):
+        with Session(autoflush=False, bind=engine) as db:
+            for track in tracks:
+                db.add(
+                    MusicQueue(
+                        guild_id=guild_id,
+                        title=track.get("title"),
+                        stream_url=track.get("stream_url"),
+                        webpage_url=track.get("webpage_url"),
+                    )
+                )
+            db.commit()
+
+    def pop_next_track(self, guild_id: int) -> dict | None:
+        with Session(autoflush=False, bind=engine) as db:
+            entry = (
+                db.query(MusicQueue)
+                .filter_by(guild_id=guild_id)
+                .order_by(MusicQueue.id.asc())
+                .first()
+            )
+            if not entry:
+                return None
+            track = {
+                "id": entry.id,
+                "title": entry.title,
+                "stream_url": entry.stream_url,
+                "webpage_url": entry.webpage_url,
+            }
+            db.delete(entry)
+            db.commit()
+            return track
+
+    def clear_queue(self, guild_id: int):
+        with Session(autoflush=False, bind=engine) as db:
+            db.query(MusicQueue).filter_by(guild_id=guild_id).delete()
+            db.commit()

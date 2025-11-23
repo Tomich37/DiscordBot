@@ -9,8 +9,11 @@ RUN sed -i 's/deb.debian.org/mirror.yandex.ru/g' /etc/apt/sources.list && \
         gcc \
         ffmpeg \
         libsm6 \
+        curl \
         libxext6 && \
     rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL https://deno.land/install.sh | sh
 
 FROM python:3.13.5-bookworm
 WORKDIR /app
