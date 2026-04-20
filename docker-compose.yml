@@ -23,6 +23,8 @@ services:
     environment:
       DISCORD_TOKEN: ${DISCORD_MAIN_TOKEN}
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@emilia-db:5432/${POSTGRES_DB}
+    volumes:
+      - ./logs:/app/app/modules/logs
     depends_on:
       emilia-db:
         condition: service_healthy
