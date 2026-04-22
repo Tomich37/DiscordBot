@@ -17,11 +17,7 @@ class ContextMenu(commands.Cog):
 
             # Проверяем, что сообщение содержит вложения
             if message.attachments:
-                for attachment in message.attachments:
-                    save_path = "./app/modules/temp/"
-                    await attachment.save(f"{save_path}downloaded_{attachment.filename}")
-                await self.sc.video_convert()
-                await self.sc.send_files(inter)
+                await self.sc.process_video_conversion(inter, message.attachments)
             else:
                 await inter.channel.send("В этом сообщении нет вложений.")
             

@@ -124,11 +124,7 @@ class SlashCommands(commands.Cog):
 
             # Проверяем, что сообщение содержит вложения
             if message.attachments:
-                save_path = "./app/modules/temp/"
-                for attachment in message.attachments:
-                    await attachment.save(f"{save_path}downloaded_{attachment.filename}")
-                await self.sc.video_convert()
-                await self.sc.send_files(inter)
+                await self.sc.process_video_conversion(inter, message.attachments)
             else:
                 await inter.followup.send("В этом сообщении нет вложений.")     
         except disnake.NotFound:
