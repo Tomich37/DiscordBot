@@ -11,6 +11,8 @@ class SlashCommands(commands.Cog):
         self.db= Database()
         self.sc = Scripts(logger, bot)
 
+    convert_formats = commands.option_enum({"MOV": "mov", "GIF (до 10 сек)": "gif"})
+
     @commands.slash_command(
         name="ping",
         description="Понг",
@@ -103,6 +105,7 @@ class SlashCommands(commands.Cog):
         self,
         inter,
         message_id: str,
+        output_format: convert_formats = "mov",
         channel: disnake.TextChannel = None
     ):
         """
@@ -124,7 +127,7 @@ class SlashCommands(commands.Cog):
 
             # Проверяем, что сообщение содержит вложения
             if message.attachments:
-                await self.sc.process_video_conversion(inter, message.attachments)
+                await self.sc.process_video_conversion(inter, message.attachments, output_format=output_format)
             else:
                 await inter.followup.send("В этом сообщении нет вложений.")     
         except disnake.NotFound:
