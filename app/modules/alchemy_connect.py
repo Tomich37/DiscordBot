@@ -1,5 +1,16 @@
-from sqlalchemy.orm import sessionmaker, declarative_base
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, BigInteger, Date, ForeignKey, exc
+from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    Column,
+    Date,
+    ForeignKey,
+    Integer,
+    String,
+    UniqueConstraint,
+    create_engine,
+    exc,
+)
 import os
 from dotenv import load_dotenv
 import time
@@ -37,6 +48,28 @@ class Contests(Base):
     channel_id = Column(BigInteger,)
     emoji_str = Column(String,)
     status = Column(Boolean,)
+
+
+class ContestRun(Base):
+    __tablename__ = "contest_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    guild_id = Column(BigInteger, nullable=False, index=True)
+    channel_id = Column(BigInteger, nullable=False, index=True)
+    contest_name = Column(String, nullable=False)
+    emoji_str = Column(String, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+
+
+class ContestMessage(Base):
+    __tablename__ = "contest_messages"
+    __table_args__ = (
+        UniqueConstraint("contest_id", "message_id", name="uq_contest_message"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    contest_id = Column(Integer, ForeignKey("contest_runs.id"), nullable=False, index=True)
+    message_id = Column(BigInteger, nullable=False, index=True)
 
 class TrackedChannel(Base):
     __tablename__ = "tracked_channels"

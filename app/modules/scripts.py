@@ -1,17 +1,13 @@
 import asyncio
 import os
-import re
 import shutil
 import uuid
 from collections import deque
 from datetime import date, timedelta
-from io import BytesIO
 from pathlib import Path
 
 import disnake
-import matplotlib.pyplot as plt
 from moviepy import VideoFileClip, vfx
-from PIL import Image
 
 from app.modules.database import Database
 
@@ -30,56 +26,63 @@ class Scripts:
         self.logger = logger
         self.bot = bot
         self.db = Database
-        self.all_messages = {}
         self._temp_dir = Path(os.path.dirname(os.path.abspath(__file__))) / "temp"
         self._temp_dir.mkdir(parents=True, exist_ok=True)
 
-    async def read_messages_with_reaction(self, channel_id, emoji, inter):
+    async def read_messages_with_reaction(self, channel_id, emoji, inter, contest_id, top_count=10):
         try:
             channel = self.bot.get_channel(channel_id)
-            match = re.match(r"<a?:(\w+):(\d+)>", emoji)
-            if match:
-                name = match.group(1)
-                emoji_id = int(match.group(2))
-            else:
-                return None
-
             if not channel:
                 self.logger.warning(f"Канал с id {channel_id} не найден.")
-                await inter.response.send_message(f"Канал с id {channel_id} не найден.")
                 return
 
-            target_emoji = disnake.PartialEmoji(name=name, id=emoji_id)
-            async for message in channel.history(limit=1000):
-                reactions = message.reactions
+            db = Database()
+            contest_messages = db.get_contest_messages(contest_id)
+            if not contest_messages:
+                await channel.send("В этом конкурсе пока нет постов, привязанных к текущему запуску.")
+                return
 
-                if any(reaction.emoji == target_emoji for reaction in reactions):
-                    reaction = disnake.utils.get(message.reactions, emoji=target_emoji)
-                    self.all_messages[message.id] = {
-                        "reactions_count": reaction.count,
-                        "content": message.content,
-                        "attachments": [attachment.url for attachment in message.attachments],
-                        "url": message.jump_url,
-                    }
+            collected_messages = []
+            for contest_message in contest_messages:
+                try:
+                    message = await channel.fetch_message(contest_message.message_id)
+                except disnake.NotFound:
+                    continue
+
+                reaction = next(
+                    (item for item in message.reactions if str(item.emoji) == emoji),
+                    None,
+                )
+                if reaction:
+                    collected_messages.append(
+                        {
+                            "reactions_count": reaction.count,
+                            "content": message.content,
+                            "attachments": [attachment.url for attachment in message.attachments],
+                            "url": message.jump_url,
+                        }
+                    )
 
             sorted_messages = sorted(
-                self.all_messages.values(),
-                key=lambda x: x["reactions_count"],
+                collected_messages,
+                key=lambda item: item["reactions_count"],
                 reverse=True,
             )
-            await self.send_embeds(sorted_messages, channel)
+            await self.send_embeds(sorted_messages, channel, top_count=top_count)
         except Exception as e:
             self.logger.error(f"Ошибка в scripts/read_messages_with_reaction: {e}")
             print(f"Ошибка в scripts/read_messages_with_reaction: {e}")
 
     async def send_embeds(self, sorted_messages, channel, top_count=10):
         try:
-            place = 0
-            for sorted_message in sorted_messages[:top_count]:
-                place += 1
+            if not sorted_messages:
+                await channel.send("По этому запуску конкурса не найдено сообщений с голосами.")
+                return
+
+            for place, sorted_message in enumerate(sorted_messages[:top_count], start=1):
                 embed = disnake.Embed(
                     title=f"{place} место",
-                    description=sorted_message["content"],
+                    description=sorted_message["content"] or "Без текста",
                     color=0x00FF00,
                 )
                 if sorted_message["attachments"]:
@@ -93,7 +96,6 @@ class Scripts:
                     text=f"Количество голосов {sorted_message['reactions_count']}"
                 )
                 await channel.send(embed=embed)
-            self.all_messages.clear()
         except Exception as e:
             self.logger.error(f"Ошибка в scripts/send_embeds: {e}")
             print(f"Ошибка в scripts/send_embeds: {e}")
@@ -203,7 +205,8 @@ class Scripts:
 
                 if speed_factor is not None:
                     notices.append(
-                        f"`{input_path.name}` был ускорен в {speed_factor:.2f}x, чтобы GIF длился не дольше {self.MAX_GIF_DURATION_SECONDS} секунд."
+                        f"`{input_path.name}` был ускорен в {speed_factor:.2f}x, "
+                        f"чтобы GIF длился не дольше {self.MAX_GIF_DURATION_SECONDS} секунд."
                     )
 
                 self.logger.info(
@@ -224,7 +227,10 @@ class Scripts:
         notices: list[str],
     ):
         files = [disnake.File(str(file_path)) for file_path in converted_files]
-        content = f"{inter.author.mention}, конвертация в `{output_format}` завершена. Готовые файлы ниже."
+        content = (
+            f"{inter.author.mention}, конвертация в `{output_format}` завершена. "
+            "Готовые файлы ниже."
+        )
 
         if notices:
             content = f"{content}\n" + "\n".join(notices)
@@ -309,8 +315,7 @@ class Scripts:
 
     async def send_daily_statistics(self):
         try:
-            today = date.today()
-            yesterday = today - timedelta(days=1)
+            yesterday = date.today() - timedelta(days=1)
             active_channels = self.db.get_all_statistics_channel()
 
             for channel_id in active_channels:
