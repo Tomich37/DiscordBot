@@ -26,6 +26,8 @@ class SlashCommands(commands.Cog):
     @commands.slash_command(
         name="role",
         description="Назначить/снять роль",
+        dm_permission=False,
+        default_member_permissions=disnake.Permissions(administrator=True, manage_roles=True),
     )
     @commands.has_permissions(administrator=True, manage_roles=True)
     async def role(
@@ -73,6 +75,8 @@ class SlashCommands(commands.Cog):
     @commands.slash_command(
         name="contest",
         description="Организация конкурса",
+        dm_permission=False,
+        default_member_permissions=disnake.Permissions(administrator=True),
     )
     @commands.has_permissions(administrator=True)
     async def contest(
@@ -197,6 +201,8 @@ class SlashCommands(commands.Cog):
     @commands.slash_command(
         name="add_statistic",
         description="Статистика канала",
+        dm_permission=False,
+        default_member_permissions=disnake.Permissions(administrator=True, manage_roles=True),
     )
     @commands.has_permissions(administrator=True, manage_roles=True)
     async def add_statistic(
@@ -242,6 +248,8 @@ class SlashCommands(commands.Cog):
     @commands.slash_command(
         name="add_anonimus_channel",
         description="Добавить/удалить канал из списка разрешённых для анонимных сообщений",
+        dm_permission=False,
+        default_member_permissions=disnake.Permissions(administrator=True),
     )
     @commands.has_permissions(administrator=True)
     async def add_anonimus_channel(
