@@ -10,7 +10,7 @@ from pathlib import Path
 
 import disnake
 import matplotlib.pyplot as plt
-from moviepy import VideoFileClip
+from moviepy import VideoFileClip, vfx
 from PIL import Image
 
 from app.modules.database import Database
@@ -126,23 +126,23 @@ class Scripts:
             return {".mp4", ".avi", ".mkv", ".mov", ".webm"}
         return {".mp4", ".avi", ".mkv"}
 
-    def _trim_clip(self, clip, end_time: int):
-        if hasattr(clip, "subclipped"):
-            return clip.subclipped(0, end_time)
-        return clip.subclip(0, end_time)
-
     def _resize_clip(self, clip, width: int):
         if hasattr(clip, "resized"):
             return clip.resized(width=width)
         return clip.resize(width=width)
+
+    def _speed_up_clip(self, clip, factor: float):
+        if hasattr(clip, "with_speed_scaled"):
+            return clip.with_speed_scaled(factor)
+        return clip.fx(vfx.speedx, factor)
 
     def _convert_single_video(
         self,
         input_path: Path,
         output_path: Path,
         output_format: str,
-    ) -> tuple[Path, bool]:
-        was_trimmed = False
+    ) -> tuple[Path, float | None]:
+        speed_factor = None
 
         with VideoFileClip(str(input_path)) as video:
             clip = video
@@ -150,8 +150,8 @@ class Scripts:
             if output_format == "gif":
                 duration = float(video.duration or 0)
                 if duration > self.MAX_GIF_DURATION_SECONDS:
-                    clip = self._trim_clip(video, self.MAX_GIF_DURATION_SECONDS)
-                    was_trimmed = True
+                    speed_factor = duration / self.MAX_GIF_DURATION_SECONDS
+                    clip = self._speed_up_clip(video, speed_factor)
 
                 if clip.w and clip.w > self.GIF_MAX_WIDTH:
                     clip = self._resize_clip(clip, self.GIF_MAX_WIDTH)
@@ -170,7 +170,7 @@ class Scripts:
                     logger=None,
                 )
 
-        return output_path, was_trimmed
+        return output_path, speed_factor
 
     def _convert_videos_in_dir(
         self,
@@ -190,7 +190,7 @@ class Scripts:
             output_path = self._build_output_path(input_path, output_format)
 
             try:
-                converted_path, was_trimmed = self._convert_single_video(
+                converted_path, speed_factor = self._convert_single_video(
                     input_path=input_path,
                     output_path=output_path,
                     output_format=output_format,
@@ -201,9 +201,9 @@ class Scripts:
 
                 converted_files.append(converted_path)
 
-                if was_trimmed:
+                if speed_factor is not None:
                     notices.append(
-                        f"`{input_path.name}` был обрезан до {self.MAX_GIF_DURATION_SECONDS} секунд для GIF."
+                        f"`{input_path.name}` был ускорен в {speed_factor:.2f}x, чтобы GIF длился не дольше {self.MAX_GIF_DURATION_SECONDS} секунд."
                     )
 
                 self.logger.info(
