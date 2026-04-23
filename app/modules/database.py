@@ -3,6 +3,8 @@ from app.modules.alchemy_connect import (
     ContestRun,
     Contests,
     MessageStatistics,
+    RecruitmentPosition,
+    RecruitmentQuestion,
     Recruitments,
     Session,
     TrackedAnonimusChannel,
@@ -180,6 +182,57 @@ class Database:
         with Session(autoflush=False, bind=engine) as db:
             recruitment = db.query(Recruitments).filter_by(guild_id=guild_id).first()
             return recruitment
+
+    def replace_recruitment_positions(self, guild_id: int, positions: list[dict]):
+        with Session(autoflush=False, bind=engine) as db:
+            db.query(RecruitmentPosition).filter_by(guild_id=guild_id).delete()
+
+            for index, position in enumerate(positions):
+                db.add(
+                    RecruitmentPosition(
+                        guild_id=guild_id,
+                        title=position["title"],
+                        description=position["description"],
+                        sort_order=index,
+                    )
+                )
+
+            db.commit()
+
+    def get_recruitment_positions(self, guild_id: int):
+        with Session(autoflush=False, bind=engine) as db:
+            return (
+                db.query(RecruitmentPosition)
+                .filter_by(guild_id=guild_id)
+                .order_by(RecruitmentPosition.sort_order.asc())
+                .all()
+            )
+
+    def replace_recruitment_questions(self, guild_id: int, questions: list[dict]):
+        with Session(autoflush=False, bind=engine) as db:
+            db.query(RecruitmentQuestion).filter_by(guild_id=guild_id).delete()
+
+            for index, question in enumerate(questions):
+                db.add(
+                    RecruitmentQuestion(
+                        guild_id=guild_id,
+                        label=question["label"],
+                        placeholder=question["placeholder"],
+                        style=question["style"],
+                        sort_order=index,
+                    )
+                )
+
+            db.commit()
+
+    def get_recruitment_questions(self, guild_id: int):
+        with Session(autoflush=False, bind=engine) as db:
+            return (
+                db.query(RecruitmentQuestion)
+                .filter_by(guild_id=guild_id)
+                .order_by(RecruitmentQuestion.sort_order.asc())
+                .all()
+            )
 
     # Обновление статуса отслеживания анонимного канала.
     def create_update_channel_anonimus(self, guild_id: int, channel_id: int, status: bool):
