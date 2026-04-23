@@ -51,9 +51,10 @@ class PrefixCommands(commands.Cog):
             return
         try:
             sent_message = await ctx.channel.send(message[:2000])
-            await self._send_dm_notice(
+            await self._send_action_notice(
                 ctx,
-                f"Анонимное сообщение отправлено в канал {ctx.channel.mention}. ID сообщения: `{sent_message.id}`.",
+                f"Анонимное сообщение отправлено в {self._format_channel_for_notice(ctx.channel)}. "
+                f"ID сообщения: `{sent_message.id}`.",
             )
             self.logger.info(
                 f"Анонимное сообщение через e!anon от {ctx.author} (ID: {ctx.author.id}) "
@@ -61,7 +62,7 @@ class PrefixCommands(commands.Cog):
             )
         except Exception as e:
             self.logger.exception(f"Ошибка в prefix_commands/anon: {e}")
-            await self._send_dm_notice(ctx, f"Не удалось отправить анонимное сообщение: {e}")
+            await self._send_action_notice(ctx, f"Не удалось отправить анонимное сообщение: {e}", force=True)
 
     @commands.command(name="help")
     async def help(self, ctx):
@@ -105,21 +106,25 @@ class PrefixCommands(commands.Cog):
     ):
         if not await self._delete_source_message(ctx):
             return
+        if ctx.guild is None:
+            await self._send_action_notice(ctx, "Команда `e!stat` работает только на сервере.", force=True)
+            return
+
         status = status.lower()
         if status not in {"start", "on", "enable", "stop", "off", "disable"}:
-            await self._send_dm_notice(ctx, "Статус должен быть `start/on` или `stop/off`.")
+            await self._send_action_notice(ctx, "Статус должен быть `start/on` или `stop/off`.", force=True)
             return
 
         try:
             is_active = status in {"start", "on", "enable"}
             self.db.create_update_channel_statistic(ctx.guild.id, channel.id, is_active)
             if is_active:
-                await self._send_dm_notice(ctx, f"Статистика включена для канала {channel.mention}.")
+                await self._send_action_notice(ctx, f"Статистика включена для канала {channel.mention}.")
             else:
-                await self._send_dm_notice(ctx, f"Статистика выключена для канала {channel.mention}.")
+                await self._send_action_notice(ctx, f"Статистика выключена для канала {channel.mention}.")
         except Exception as e:
             self.logger.exception(f"Ошибка в prefix_commands/stat: {e}")
-            await self._send_dm_notice(ctx, f"Не удалось изменить статистику канала: {e}")
+            await self._send_action_notice(ctx, f"Не удалось изменить статистику канала: {e}", force=True)
 
     @commands.command(name="role")
     async def role(
@@ -131,29 +136,33 @@ class PrefixCommands(commands.Cog):
     ):
         if not await self._delete_source_message(ctx):
             return
+        if ctx.guild is None:
+            await self._send_action_notice(ctx, "Команда `e!role` работает только на сервере.", force=True)
+            return
+
         action = action.lower()
         if action not in {"add", "give", "take", "remove", "del"}:
-            await self._send_dm_notice(ctx, "Действие должно быть `add` или `take`.")
+            await self._send_action_notice(ctx, "Действие должно быть `add` или `take`.", force=True)
             return
 
         try:
             if action in {"add", "give"}:
                 await member.add_roles(role)
-                await self._send_dm_notice(
+                await self._send_action_notice(
                     ctx,
                     f"Роль `{role.name}` выдана участнику `{member.display_name}`.",
                 )
             else:
                 await member.remove_roles(role)
-                await self._send_dm_notice(
+                await self._send_action_notice(
                     ctx,
                     f"Роль `{role.name}` снята с участника `{member.display_name}`.",
                 )
         except disnake.Forbidden:
-            await self._send_dm_notice(ctx, "У бота нет прав для изменения этой роли.")
+            await self._send_action_notice(ctx, "У бота нет прав для изменения этой роли.", force=True)
         except Exception as e:
             self.logger.exception(f"Ошибка в prefix_commands/role: {e}")
-            await self._send_dm_notice(ctx, f"Не удалось изменить роль: {e}")
+            await self._send_action_notice(ctx, f"Не удалось изменить роль: {e}", force=True)
 
     @commands.command(name="logs")
     async def logs(self, ctx, log_type: str = None, line_count: int = 3):
@@ -216,6 +225,9 @@ class PrefixCommands(commands.Cog):
             )
 
     async def _delete_source_message(self, ctx) -> bool:
+        if ctx.guild is None:
+            return True
+
         try:
             await ctx.message.delete()
             return True
@@ -231,6 +243,20 @@ class PrefixCommands(commands.Cog):
             self.logger.exception(f"Ошибка при удалении prefix-команды: {e}")
             await self._send_dm_notice(ctx, f"Не смог удалить командное сообщение: {e}")
             return False
+
+    async def _send_action_notice(self, ctx, message: str, *, force: bool = False) -> None:
+        if ctx.guild is None and not force:
+            return
+
+        await self._send_dm_notice(ctx, message)
+
+    @staticmethod
+    def _format_channel_for_notice(channel) -> str:
+        mention = getattr(channel, "mention", None)
+        if mention:
+            return f"канал {mention}"
+
+        return "личные сообщения"
 
     async def _send_dm_notice(self, ctx, message: str) -> None:
         try:
