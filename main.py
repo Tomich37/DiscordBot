@@ -62,7 +62,7 @@ async def load_cogs(bot):
     cogs_dir = Path("./app/modules/cogs")
     for file in cogs_dir.glob("**/*.py"):
         if file.name.endswith(".py") and not file.name.startswith("_"):
-            module_path = ".".join(file.with_suffix("").parts)
+            module_path = str(file).replace("/", ".").replace(".py", "")
             try:
                 cog = importlib.import_module(module_path)
                 if hasattr(cog, "setup"):
@@ -82,7 +82,7 @@ async def main():
         await msg_handler.process_message()
 
     await load_cogs(pybot)
-    await pybot.start(TEST_TOKEN)
+    await pybot.start(MAIN_TOKEN)
 
 if __name__ == "__main__":
     asyncio.run(main())
