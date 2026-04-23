@@ -92,6 +92,28 @@ class Recruitments(Base):
     channel_id = Column(BigInteger,)
     message_id = Column(BigInteger,)
 
+
+class RecruitmentPosition(Base):
+    __tablename__ = "recruitment_positions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    guild_id = Column(BigInteger, nullable=False, index=True)
+    title = Column(String(100), nullable=False)
+    description = Column(String(100), nullable=False)
+    sort_order = Column(Integer, default=0, nullable=False)
+
+
+class RecruitmentQuestion(Base):
+    __tablename__ = "recruitment_questions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    guild_id = Column(BigInteger, nullable=False, index=True)
+    label = Column(String(45), nullable=False)
+    placeholder = Column(String(100), nullable=False)
+    style = Column(String(20), default="paragraph", nullable=False)
+    sort_order = Column(Integer, default=0, nullable=False)
+
+
 class TrackedAnonimusChannel(Base):
     __tablename__ = "tracked_anonimus_channels"
     id = Column(Integer, primary_key=True, index=True)

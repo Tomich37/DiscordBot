@@ -2,6 +2,8 @@ import disnake
 from disnake.ext import commands
 
 from app.modules.database import Database
+from app.modules.menus.recruitment import RecruitmentView
+from app.modules.modals.recruitment_setup_modal import RecruitmentSetupModal
 from app.modules.scripts import Scripts
 
 
@@ -246,6 +248,47 @@ class SlashCommands(commands.Cog):
     )
 
     @commands.slash_command(
+        name="recruitment_create",
+        description="Создать панель набора через модальное окно",
+        dm_permission=False,
+        default_member_permissions=disnake.Permissions(administrator=True),
+    )
+    @commands.has_permissions(administrator=True)
+    async def recruitment_create(
+        self,
+        inter: disnake.GuildCommandInteraction,
+        requests_channel: disnake.TextChannel,
+        position_count: commands.Range[int, 1, 5],
+        panel_channel: disnake.TextChannel = None,
+    ):
+        """
+        Создание панели набора через модальное окно.
+
+        Parameters
+        ----------
+        requests_channel: Канал, куда будут приходить заполненные заявки
+        position_count: Количество должностей для выбора, от 1 до 5
+        panel_channel: Канал, куда будет отправлена панель подачи заявок
+        """
+        try:
+            target_panel_channel = panel_channel or inter.channel
+            await inter.response.send_modal(
+                RecruitmentSetupModal(
+                    logger=self.logger,
+                    requests_channel_id=requests_channel.id,
+                    panel_channel_id=target_panel_channel.id,
+                    position_count=position_count,
+                )
+            )
+        except Exception as e:
+            await inter.response.send_message(
+                f"Ошибка при открытии настройки набора: {e}",
+                ephemeral=True,
+            )
+            self.logger.error(f"Ошибка в commands/recruitment_create: {e}")
+            print(f"Ошибка в commands/recruitment_create: {e}")
+
+    @commands.slash_command(
         name="add_anonimus_channel",
         description="Добавить/удалить канал из списка разрешённых для анонимных сообщений",
         dm_permission=False,
@@ -342,4 +385,5 @@ class SlashCommands(commands.Cog):
 
 
 def setup(bot, logger):
+    bot.add_view(RecruitmentView(logger))
     bot.add_cog(SlashCommands(bot, logger))

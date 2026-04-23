@@ -1,34 +1,46 @@
 import disnake
 from disnake.interactions import MessageInteraction
 from app.modules.modals.recruitmentmodal import RecruitementModal
-from app.modules.database import Database
 
-# Меню для выбора роли
+
+# Меню для выбора должности в заявке.
 class RecruitmentSelect(disnake.ui.StringSelect):
-    def __init__(self, logger, guild_id):
+    def __init__(self, logger, positions: list[dict] | None = None):
         self.logger = logger
-        self.guild_id = guild_id
-        self.db = Database()
+        positions = positions or [
+            {
+                "title": "Заявка",
+                "description": "Выберите этот пункт, если панель была создана до обновления",
+            }
+        ]
         options = [
-            disnake.SelectOption(label='Харон', value='Харон', description='Роль для собеседований и принятия на сервер'),
-            disnake.SelectOption(label='Страж', value='Страж', description='Роль модератора'),
-            disnake.SelectOption(label='Ивентмейкер', value='Ивентмейкер', description='Роль для проведения ивентов'),
+            disnake.SelectOption(
+                label=position["title"][:100],
+                value=position["title"][:100],
+                description=position["description"][:100],
+            )
+            for position in positions[:25]
         ]
         super().__init__(
-            placeholder="Выбери желаемую роль", options=options, min_values=0, max_values=1, custom_id='recuitment'
-            )
+            placeholder="Выбери желаемую должность",
+            options=options,
+            min_values=1,
+            max_values=1,
+            custom_id="recruitment_select",
+        )
         
     async def callback(self, interaction: MessageInteraction):
         try:
-            if not interaction.values:
-                await interaction.response.defer()
-            else:
-                response_message = await interaction.response.send_message(
-                    await interaction.response.send_modal(RecruitementModal(interaction.values[0], self.guild_id, self.logger))
-                )
-                message_id = response_message.id
-                self.db.create_update_recruitment_message(message_id)
+            await interaction.response.send_modal(
+                RecruitementModal(interaction.values[0], interaction.guild.id, self.logger)
+            )
         except Exception as e:
-            self.logger.error(f'Ошибка в menus/recruitment: {e}')
-            print(f'Ошибка в menus/recruitment: {e}')
+            self.logger.error(f"Ошибка в menus/recruitment: {e}")
+            print(f"Ошибка в menus/recruitment: {e}")
+
+
+class RecruitmentView(disnake.ui.View):
+    def __init__(self, logger, positions: list[dict] | None = None):
+        super().__init__(timeout=None)
+        self.add_item(RecruitmentSelect(logger, positions))
 
