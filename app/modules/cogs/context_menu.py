@@ -23,7 +23,7 @@ class ContextMenu(commands.Cog):
         except Exception as e:
             await inter.channel.send("Я не вижу этого сообщения")
             await inter.delete_original_response()
-            self.logger.error(f"Ошибка в commands/convert: {e}")
+            self.logger.exception(f"Ошибка в commands/convert: {e}")
             print(f"Ошибка в commands/convert: {e}")
 
     @commands.message_command(name="Convert Video to GIF")
@@ -44,7 +44,7 @@ class ContextMenu(commands.Cog):
         except Exception as e:
             await inter.channel.send("Я не вижу этого сообщения")
             await inter.delete_original_response()
-            self.logger.error(f"Ошибка в commands/convert_to_gif: {e}")
+            self.logger.exception(f"Ошибка в commands/convert_to_gif: {e}")
             print(f"Ошибка в commands/convert_to_gif: {e}")
 
 

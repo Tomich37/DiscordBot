@@ -103,5 +103,5 @@ class RecruitementModal(disnake.ui.Modal):
             request_embed.set_footer(text="Заявка ожидает рассмотрения администрацией")
             await channel.send(embed=request_embed)
         except Exception as e:
-            self.logger.error(f'Ошибка в modals/recruitmentmodal: {e}')
+            self.logger.exception(f'Ошибка в modals/recruitmentmodal: {e}')
             print(f'Ошибка в modals/recruitmentmodal: {e}')

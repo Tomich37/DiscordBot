@@ -150,7 +150,7 @@ class SlashCommands(commands.Cog):
                     ephemeral=False,
                 )
         except Exception as e:
-            self.logger.error(f"Ошибка в commands/contest: {e}")
+            self.logger.exception(f"Ошибка в commands/contest: {e}")
             print(f"Ошибка в commands/contest: {e}")
 
     @commands.slash_command(
@@ -193,7 +193,7 @@ class SlashCommands(commands.Cog):
         except Exception as e:
             await inter.followup.send(f"Произошла ошибка: {str(e)}")
             await inter.delete_original_response()
-            self.logger.error(f"Ошибка в commands/convert: {e}")
+            self.logger.exception(f"Ошибка в commands/convert: {e}")
             print(f"Ошибка в commands/convert: {e}")
 
     statisticStatus = commands.option_enum(
@@ -240,7 +240,7 @@ class SlashCommands(commands.Cog):
                 )
         except Exception as e:
             await inter.channel.send(f"Ошибка в commands/slash_command/add_statistic: {e}")
-            self.logger.error(f"Ошибка в commands/slash_command/add_statistic: {e}")
+            self.logger.exception(f"Ошибка в commands/slash_command/add_statistic: {e}")
             print(f"Ошибка в commands/slash_command/add_statistic: {e}")
 
     channelAnonimusMenegment = commands.option_enum(
@@ -285,7 +285,7 @@ class SlashCommands(commands.Cog):
                 f"Ошибка при открытии настройки набора: {e}",
                 ephemeral=True,
             )
-            self.logger.error(f"Ошибка в commands/recruitment_create: {e}")
+            self.logger.exception(f"Ошибка в commands/recruitment_create: {e}")
             print(f"Ошибка в commands/recruitment_create: {e}")
 
     @commands.slash_command(
@@ -328,7 +328,7 @@ class SlashCommands(commands.Cog):
                 )
         except Exception as e:
             await inter.channel.send(f"Ошибка в commands/slash_command/channelAnonimus: {e}")
-            self.logger.error(f"Ошибка в commands/slash_command/channelAnonimus: {e}")
+            self.logger.exception(f"Ошибка в commands/slash_command/channelAnonimus: {e}")
             print(f"Ошибка в commands/slash_command/channelAnonimus: {e}")
 
     @commands.slash_command(
@@ -380,7 +380,7 @@ class SlashCommands(commands.Cog):
         except Exception as e:
             error_msg = f"Ошибка при отправке анонимного сообщения: {e}"
             await inter.response.send_message(error_msg, ephemeral=True)
-            self.logger.error(f"Ошибка в commands/slash_command/send_anonimus_channel: {e}")
+            self.logger.exception(f"Ошибка в commands/slash_command/send_anonimus_channel: {e}")
             print(error_msg)
 
 

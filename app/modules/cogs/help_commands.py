@@ -404,7 +404,7 @@ class Help(commands.Cog):
 
             await inter.response.send_message(embed=embed)
         except Exception as e:
-            self.logger.error(f"Ошибка в help_commands/help_command: {e}")
+            self.logger.exception(f"Ошибка в help_commands/help_command: {e}")
             print(f"Ошибка в help_commands/help_command: {e}")
 
 

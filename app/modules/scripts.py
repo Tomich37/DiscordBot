@@ -70,7 +70,7 @@ class Scripts:
             )
             await self.send_embeds(sorted_messages, channel, top_count=top_count)
         except Exception as e:
-            self.logger.error(f"Ошибка в scripts/read_messages_with_reaction: {e}")
+            self.logger.exception(f"Ошибка в scripts/read_messages_with_reaction: {e}")
             print(f"Ошибка в scripts/read_messages_with_reaction: {e}")
 
     async def send_embeds(self, sorted_messages, channel, top_count=10):
@@ -97,7 +97,7 @@ class Scripts:
                 )
                 await channel.send(embed=embed)
         except Exception as e:
-            self.logger.error(f"Ошибка в scripts/send_embeds: {e}")
+            self.logger.exception(f"Ошибка в scripts/send_embeds: {e}")
             print(f"Ошибка в scripts/send_embeds: {e}")
 
     def _create_job_dir(self) -> Path:
@@ -213,7 +213,7 @@ class Scripts:
                     f"Успешно конвертировано: {input_path.name} -> {output_path.name}"
                 )
             except Exception as clip_error:
-                self.logger.error(
+                self.logger.exception(
                     f"Ошибка при обработке файла {input_path.name}: {clip_error}"
                 )
 
@@ -299,7 +299,7 @@ class Scripts:
 
             await self._send_converted_files(inter, converted_files, output_format, notices)
         except Exception as e:
-            self.logger.error(f"Ошибка в scripts/process_video_conversion: {e}")
+            self.logger.exception(f"Ошибка в scripts/process_video_conversion: {e}")
             await inter.followup.send(
                 f"{inter.author.mention}, произошла ошибка при конвертации: {e}"
             )
@@ -330,5 +330,5 @@ class Scripts:
                             f"Статистика за {yesterday}: {stats.message_count} сообщений"
                         )
         except Exception as e:
-            self.logger.error(f"Ошибка в scripts/send_daily_statistics: {e}")
+            self.logger.exception(f"Ошибка в scripts/send_daily_statistics: {e}")
             print(f"Ошибка в scripts/send_daily_statistics: {e}")
