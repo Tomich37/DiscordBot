@@ -127,6 +127,7 @@ class Database:
         guild_id: int,
         channel_id: int,
         message_id: int,
+        admin_channel_id: int,
         creator_id: int,
         emoji_str: str,
         description: str,
@@ -137,6 +138,7 @@ class Database:
                 guild_id=guild_id,
                 channel_id=channel_id,
                 message_id=message_id,
+                admin_channel_id=admin_channel_id,
                 creator_id=creator_id,
                 emoji_str=emoji_str,
                 description=description,
@@ -144,6 +146,17 @@ class Database:
                 is_active=True,
             )
             db.add(giveaway)
+            db.commit()
+            db.refresh(giveaway)
+            return giveaway
+
+    def update_giveaway_admin_message(self, giveaway_id: int, admin_message_id: int):
+        with Session(autoflush=False, bind=engine) as db:
+            giveaway = db.query(Giveaway).filter_by(id=giveaway_id).first()
+            if not giveaway:
+                return None
+
+            giveaway.admin_message_id = admin_message_id
             db.commit()
             db.refresh(giveaway)
             return giveaway
@@ -156,6 +169,19 @@ class Database:
                     guild_id=guild_id,
                     channel_id=channel_id,
                     message_id=message_id,
+                    is_active=True,
+                )
+                .first()
+            )
+
+    def get_active_giveaway_by_admin_message(self, guild_id: int, admin_channel_id: int, admin_message_id: int):
+        with Session(autoflush=False, bind=engine) as db:
+            return (
+                db.query(Giveaway)
+                .filter_by(
+                    guild_id=guild_id,
+                    admin_channel_id=admin_channel_id,
+                    admin_message_id=admin_message_id,
                     is_active=True,
                 )
                 .first()
@@ -241,6 +267,25 @@ class Database:
                 .all()
             )
             return [participant.user_id for participant in participants]
+
+    def get_giveaway_stats(self, giveaway_id: int) -> dict[str, int]:
+        with Session(autoflush=False, bind=engine) as db:
+            active_count = (
+                db.query(GiveawayParticipant)
+                .filter_by(giveaway_id=giveaway_id, is_active=True)
+                .count()
+            )
+            left_count = (
+                db.query(GiveawayParticipant)
+                .filter_by(giveaway_id=giveaway_id, is_active=False)
+                .count()
+            )
+
+            return {
+                "active_count": active_count,
+                "left_count": left_count,
+                "total_count": active_count + left_count,
+            }
 
     def finish_giveaway(self, giveaway_id: int, winner_ids: list[int]):
         with Session(autoflush=False, bind=engine) as db:

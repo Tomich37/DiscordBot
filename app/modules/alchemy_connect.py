@@ -12,6 +12,8 @@ from sqlalchemy import (
     UniqueConstraint,
     create_engine,
     exc,
+    inspect,
+    text,
 )
 import os
 from dotenv import load_dotenv
@@ -85,6 +87,8 @@ class Giveaway(Base):
     guild_id = Column(BigInteger, nullable=False, index=True)
     channel_id = Column(BigInteger, nullable=False, index=True)
     message_id = Column(BigInteger, nullable=False, index=True)
+    admin_channel_id = Column(BigInteger, nullable=True, index=True)
+    admin_message_id = Column(BigInteger, nullable=True, index=True)
     creator_id = Column(BigInteger, nullable=False)
     emoji_str = Column(String, nullable=False)
     description = Column(Text, nullable=False)
@@ -167,6 +171,29 @@ class TrackedAnonimusChannel(Base):
     channel_id = Column(BigInteger, nullable=False, unique=True)
     is_active = Column(Boolean, default=True)
   
-# создаем таблицы
+def ensure_schema_updates():
+    inspector = inspect(engine)
+
+    if "giveaways" in inspector.get_table_names():
+        columns = {column["name"] for column in inspector.get_columns("giveaways")}
+        with engine.begin() as connection:
+            if "admin_channel_id" not in columns:
+                connection.execute(text("ALTER TABLE giveaways ADD COLUMN admin_channel_id BIGINT"))
+            if "admin_message_id" not in columns:
+                connection.execute(text("ALTER TABLE giveaways ADD COLUMN admin_message_id BIGINT"))
+
+    if "giveaway_participants" in inspector.get_table_names():
+        columns = {column["name"] for column in inspector.get_columns("giveaway_participants")}
+        with engine.begin() as connection:
+            if "is_active" not in columns:
+                connection.execute(
+                    text("ALTER TABLE giveaway_participants ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT TRUE")
+                )
+            if "left_at" not in columns:
+                connection.execute(text("ALTER TABLE giveaway_participants ADD COLUMN left_at TIMESTAMP"))
+
+
+# Создаём таблицы и добавляем недостающие колонки для уже существующей БД.
 Base.metadata.create_all(bind=engine)
+ensure_schema_updates()
 Session = sessionmaker(autoflush=False, bind=engine)

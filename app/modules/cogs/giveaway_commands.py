@@ -4,6 +4,7 @@ import disnake
 from disnake.ext import commands
 
 from app.modules.database import Database
+from app.modules.menus.giveaway import GiveawayFinishView
 from app.modules.modals.giveaway_modal import GiveawayModal
 
 
@@ -39,6 +40,7 @@ class GiveawayCommands(commands.Cog):
                 GiveawayModal(
                     logger=self.logger,
                     channel_id=channel.id,
+                    admin_channel_id=inter.channel.id,
                     emoji_str=emoji,
                     creator_id=inter.author.id,
                 )
@@ -51,45 +53,38 @@ class GiveawayCommands(commands.Cog):
             self.logger.error(f"Ошибка в giveaway_commands/giveaway_create: {e}")
             print(f"Ошибка в giveaway_commands/giveaway_create: {e}")
 
-    @commands.slash_command(
-        name="giveaway_finish",
-        description="Завершить розыгрыш и выбрать победителей",
-        dm_permission=False,
-        default_member_permissions=disnake.Permissions(administrator=True),
-    )
-    @commands.has_permissions(administrator=True)
-    async def giveaway_finish(
+    async def finish_giveaway_from_admin_panel(
         self,
-        inter: disnake.GuildCommandInteraction,
-        channel: disnake.TextChannel,
-        message_id: str,
+        inter,
+        admin_channel: disnake.TextChannel,
+        admin_message_id: int,
     ):
-        """
-        Завершение розыгрыша по ID сообщения.
-
-        Parameters
-        ----------
-        channel: Канал, где был опубликован розыгрыш
-        message_id: ID сообщения розыгрыша
-        """
         try:
             await inter.response.defer(ephemeral=True)
 
-            giveaway = self.db.get_active_giveaway_by_message(
+            giveaway = self.db.get_active_giveaway_by_admin_message(
                 guild_id=inter.guild.id,
-                channel_id=channel.id,
-                message_id=int(message_id),
+                admin_channel_id=admin_channel.id,
+                admin_message_id=admin_message_id,
             )
             if not giveaway:
                 await inter.followup.send(
-                    "Активный розыгрыш с таким сообщением не найден.",
+                    "Активный розыгрыш для этой админ-панели не найден.",
+                    ephemeral=True,
+                )
+                return
+
+            channel = self.bot.get_channel(giveaway.channel_id)
+            if not channel:
+                await inter.followup.send(
+                    "Не удалось найти канал с сообщением розыгрыша.",
                     ephemeral=True,
                 )
                 return
 
             participant_ids = await self._sync_participants_from_reactions(channel, giveaway)
             winners = self._select_winners(participant_ids, giveaway.winner_count)
-            self.db.finish_giveaway(giveaway.id, winners)
+            giveaway = self.db.finish_giveaway(giveaway.id, winners)
 
             if winners:
                 winners_text = "\n".join(
@@ -104,13 +99,10 @@ class GiveawayCommands(commands.Cog):
                 result_text = "Розыгрыш завершён, но участников не найдено."
 
             await channel.send(result_text)
+            await self._update_admin_panel(giveaway, remove_view=True)
+
             await inter.followup.send(
                 f"Розыгрыш в канале {channel.mention} завершён.",
-                ephemeral=True,
-            )
-        except ValueError:
-            await inter.followup.send(
-                "ID сообщения должен быть числом.",
                 ephemeral=True,
             )
         except Exception as e:
@@ -151,6 +143,7 @@ class GiveawayCommands(commands.Cog):
             self.db.add_giveaway_participant(giveaway.id, payload.user_id)
         else:
             self.db.deactivate_giveaway_participant(giveaway.id, payload.user_id)
+        await self._update_admin_panel(giveaway)
 
     async def _sync_participants_from_reactions(self, channel, giveaway) -> list[int]:
         try:
@@ -184,6 +177,57 @@ class GiveawayCommands(commands.Cog):
             k=min(winner_count, len(unique_participants)),
         )
 
+    async def _update_admin_panel(self, giveaway, remove_view: bool = False):
+        if not giveaway.admin_channel_id or not giveaway.admin_message_id:
+            return
+
+        try:
+            channel = self.bot.get_channel(giveaway.admin_channel_id)
+            if not channel:
+                return
+
+            message = await channel.fetch_message(giveaway.admin_message_id)
+            stats = self.db.get_giveaway_stats(giveaway.id)
+            embed = self._build_admin_embed(
+                giveaway,
+                active_count=stats["active_count"],
+                left_count=stats["left_count"],
+            )
+            await message.edit(
+                embed=embed,
+                view=None if remove_view else GiveawayFinishView(self.logger),
+            )
+        except disnake.NotFound:
+            return
+        except Exception as e:
+            self.logger.error(f"Ошибка в giveaway_commands/_update_admin_panel: {e}")
+            print(f"Ошибка в giveaway_commands/_update_admin_panel: {e}")
+
+    @staticmethod
+    def _build_admin_embed(giveaway, active_count: int, left_count: int) -> disnake.Embed:
+        embed = disnake.Embed(
+            title="Админ-панель розыгрыша",
+            description=giveaway.description[:4096],
+            color=0x2F855A,
+        )
+        embed.add_field(
+            name="Публикация",
+            value=f"<#{giveaway.channel_id}> | [перейти](https://discord.com/channels/{giveaway.guild_id}/{giveaway.channel_id}/{giveaway.message_id})",
+            inline=False,
+        )
+        embed.add_field(name="Эмодзи участия", value=giveaway.emoji_str, inline=True)
+        embed.add_field(name="Победителей", value=str(giveaway.winner_count), inline=True)
+        embed.add_field(name="Участвуют", value=str(active_count), inline=True)
+        embed.add_field(name="Передумали", value=str(left_count), inline=True)
+        footer_text = (
+            "Розыгрыш завершён"
+            if not giveaway.is_active
+            else "Кнопка завершения доступна администраторам"
+        )
+        embed.set_footer(text=footer_text)
+        return embed
+
 
 def setup(bot, logger):
+    bot.add_view(GiveawayFinishView(logger))
     bot.add_cog(GiveawayCommands(bot, logger))
