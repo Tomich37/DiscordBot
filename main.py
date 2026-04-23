@@ -62,7 +62,7 @@ async def load_cogs(bot):
     cogs_dir = Path("./app/modules/cogs")
     for file in cogs_dir.glob("**/*.py"):
         if file.name.endswith(".py") and not file.name.startswith("_"):
-            module_path = str(file).replace("/", ".").replace(".py", "")
+            module_path = ".".join(file.with_suffix("").parts)
             try:
                 cog = importlib.import_module(module_path)
                 if hasattr(cog, "setup"):

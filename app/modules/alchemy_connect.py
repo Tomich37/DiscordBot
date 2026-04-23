@@ -4,9 +4,11 @@ from sqlalchemy import (
     Boolean,
     Column,
     Date,
+    DateTime,
     ForeignKey,
     Integer,
     String,
+    Text,
     UniqueConstraint,
     create_engine,
     exc,
@@ -14,6 +16,7 @@ from sqlalchemy import (
 import os
 from dotenv import load_dotenv
 import time
+from datetime import datetime
 
 load_dotenv()
 
@@ -70,6 +73,49 @@ class ContestMessage(Base):
     id = Column(Integer, primary_key=True, index=True)
     contest_id = Column(Integer, ForeignKey("contest_runs.id"), nullable=False, index=True)
     message_id = Column(BigInteger, nullable=False, index=True)
+
+
+class Giveaway(Base):
+    __tablename__ = "giveaways"
+    __table_args__ = (
+        UniqueConstraint("message_id", name="uq_giveaway_message"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    guild_id = Column(BigInteger, nullable=False, index=True)
+    channel_id = Column(BigInteger, nullable=False, index=True)
+    message_id = Column(BigInteger, nullable=False, index=True)
+    creator_id = Column(BigInteger, nullable=False)
+    emoji_str = Column(String, nullable=False)
+    description = Column(Text, nullable=False)
+    winner_count = Column(Integer, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    finished_at = Column(DateTime, nullable=True)
+
+
+class GiveawayParticipant(Base):
+    __tablename__ = "giveaway_participants"
+    __table_args__ = (
+        UniqueConstraint("giveaway_id", "user_id", name="uq_giveaway_participant"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    giveaway_id = Column(Integer, ForeignKey("giveaways.id"), nullable=False, index=True)
+    user_id = Column(BigInteger, nullable=False, index=True)
+    joined_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+    left_at = Column(DateTime, nullable=True)
+
+
+class GiveawayWin(Base):
+    __tablename__ = "giveaway_wins"
+
+    id = Column(Integer, primary_key=True, index=True)
+    giveaway_id = Column(Integer, ForeignKey("giveaways.id"), nullable=False, index=True)
+    user_id = Column(BigInteger, nullable=False, index=True)
+    won_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
 
 class TrackedChannel(Base):
     __tablename__ = "tracked_channels"

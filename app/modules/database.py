@@ -2,6 +2,9 @@ from app.modules.alchemy_connect import (
     ContestMessage,
     ContestRun,
     Contests,
+    Giveaway,
+    GiveawayParticipant,
+    GiveawayWin,
     MessageStatistics,
     RecruitmentPosition,
     RecruitmentQuestion,
@@ -11,6 +14,7 @@ from app.modules.alchemy_connect import (
     TrackedChannel,
     engine,
 )
+from datetime import datetime
 
 
 class Database:
@@ -117,6 +121,141 @@ class Database:
                 .order_by(ContestMessage.id.asc())
                 .all()
             )
+
+    def create_giveaway(
+        self,
+        guild_id: int,
+        channel_id: int,
+        message_id: int,
+        creator_id: int,
+        emoji_str: str,
+        description: str,
+        winner_count: int,
+    ):
+        with Session(autoflush=False, bind=engine) as db:
+            giveaway = Giveaway(
+                guild_id=guild_id,
+                channel_id=channel_id,
+                message_id=message_id,
+                creator_id=creator_id,
+                emoji_str=emoji_str,
+                description=description,
+                winner_count=winner_count,
+                is_active=True,
+            )
+            db.add(giveaway)
+            db.commit()
+            db.refresh(giveaway)
+            return giveaway
+
+    def get_active_giveaway_by_message(self, guild_id: int, channel_id: int, message_id: int):
+        with Session(autoflush=False, bind=engine) as db:
+            return (
+                db.query(Giveaway)
+                .filter_by(
+                    guild_id=guild_id,
+                    channel_id=channel_id,
+                    message_id=message_id,
+                    is_active=True,
+                )
+                .first()
+            )
+
+    def add_giveaway_participant(self, giveaway_id: int, user_id: int):
+        with Session(autoflush=False, bind=engine) as db:
+            participant = (
+                db.query(GiveawayParticipant)
+                .filter_by(giveaway_id=giveaway_id, user_id=user_id)
+                .first()
+            )
+
+            if participant:
+                participant.is_active = True
+                participant.left_at = None
+                db.commit()
+                db.refresh(participant)
+                return participant
+
+            participant = GiveawayParticipant(giveaway_id=giveaway_id, user_id=user_id)
+            db.add(participant)
+            db.commit()
+            db.refresh(participant)
+            return participant
+
+    def deactivate_giveaway_participant(self, giveaway_id: int, user_id: int):
+        with Session(autoflush=False, bind=engine) as db:
+            participant = (
+                db.query(GiveawayParticipant)
+                .filter_by(giveaway_id=giveaway_id, user_id=user_id)
+                .first()
+            )
+
+            if participant and participant.is_active:
+                participant.is_active = False
+                participant.left_at = datetime.utcnow()
+                db.commit()
+
+    def sync_giveaway_participants(self, giveaway_id: int, active_user_ids: list[int]) -> list[int]:
+        active_user_ids = list(dict.fromkeys(active_user_ids))
+        active_user_id_set = set(active_user_ids)
+
+        with Session(autoflush=False, bind=engine) as db:
+            participants = (
+                db.query(GiveawayParticipant)
+                .filter_by(giveaway_id=giveaway_id)
+                .all()
+            )
+            participants_by_user_id = {
+                participant.user_id: participant
+                for participant in participants
+            }
+
+            # Перед завершением приводим БД к фактическим реакциям под сообщением.
+            for participant in participants:
+                if participant.user_id in active_user_id_set:
+                    participant.is_active = True
+                    participant.left_at = None
+                elif participant.is_active:
+                    participant.is_active = False
+                    participant.left_at = datetime.utcnow()
+
+            for user_id in active_user_ids:
+                if user_id not in participants_by_user_id:
+                    db.add(
+                        GiveawayParticipant(
+                            giveaway_id=giveaway_id,
+                            user_id=user_id,
+                            is_active=True,
+                        )
+                    )
+
+            db.commit()
+            return active_user_ids
+
+    def get_active_giveaway_participant_ids(self, giveaway_id: int) -> list[int]:
+        with Session(autoflush=False, bind=engine) as db:
+            participants = (
+                db.query(GiveawayParticipant)
+                .filter_by(giveaway_id=giveaway_id, is_active=True)
+                .order_by(GiveawayParticipant.joined_at.asc())
+                .all()
+            )
+            return [participant.user_id for participant in participants]
+
+    def finish_giveaway(self, giveaway_id: int, winner_ids: list[int]):
+        with Session(autoflush=False, bind=engine) as db:
+            giveaway = db.query(Giveaway).filter_by(id=giveaway_id, is_active=True).first()
+            if not giveaway:
+                return None
+
+            giveaway.is_active = False
+            giveaway.finished_at = datetime.utcnow()
+            for winner_id in winner_ids:
+                db.add(GiveawayWin(giveaway_id=giveaway_id, user_id=winner_id))
+
+            db.commit()
+            db.refresh(giveaway)
+            return giveaway
 
     # Обновление статуса отслеживания канала.
     def create_update_channel_statistic(self, guild_id: int, channel_id: int, status: bool):
