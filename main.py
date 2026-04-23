@@ -15,7 +15,20 @@ from app.modules.scripts import Scripts
 load_dotenv()
 TEST_TOKEN = os.getenv('DISCORD_TEST_TOKEN')
 MAIN_TOKEN = os.getenv('DISCORD_MAIN_TOKEN')
+MI_ID = os.getenv('MI_ID')
 logger = SetLogs().logger
+ORIGINAL_HAS_PERMISSIONS = commands.has_permissions
+
+
+def _parse_mi_id(value):
+    try:
+        return int(value) if value else None
+    except ValueError:
+        logger.warning("MI_ID должен быть числом. Проверьте значение в .env.")
+        return None
+
+
+MI_USER_ID = _parse_mi_id(MI_ID)
 
 
 def _short_text(value, limit=250):
@@ -66,6 +79,46 @@ def _interaction_name(inter):
     return "неизвестно"
 
 
+def _is_mi_user(target) -> bool:
+    user = getattr(target, "author", None) or getattr(target, "user", None)
+    return bool(MI_USER_ID and user and user.id == MI_USER_ID)
+
+
+def _patch_has_permissions_for_mi():
+    def has_permissions_with_mi_access(**perms):
+        original_decorator = ORIGINAL_HAS_PERMISSIONS(**perms)
+
+        def decorator(func):
+            async def predicate(ctx):
+                if _is_mi_user(ctx):
+                    return True
+
+                permissions = ctx.permissions if isinstance(ctx, disnake.Interaction) else ctx.channel.permissions_for(
+                    ctx.author,
+                    ignore_timeout=False,
+                )
+                missing = [
+                    perm
+                    for perm, value in perms.items()
+                    if getattr(permissions, perm) != value
+                ]
+                if not missing:
+                    return True
+
+                raise commands.MissingPermissions(missing)
+
+            return commands.check(predicate)(func)
+
+        if MI_USER_ID:
+            return decorator
+        return original_decorator
+
+    commands.has_permissions = has_permissions_with_mi_access
+
+
+_patch_has_permissions_for_mi()
+
+
 class Bot(commands.Bot):
     def __init__(self, logger):
         super().__init__(
@@ -77,6 +130,10 @@ class Bot(commands.Bot):
         self.logger = logger
         self.scripts = Scripts(logger, self)
         self.scheduler = AsyncIOScheduler()
+        self.mi_user_id = MI_USER_ID
+
+    def is_mi_user(self, user) -> bool:
+        return bool(self.mi_user_id and user and user.id == self.mi_user_id)
 
     def log_user_action(self, action, inter, details=None):
         parts = [

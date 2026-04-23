@@ -16,14 +16,17 @@ class GiveawayFinishView(disnake.ui.View):
         button: disnake.ui.Button,
         interaction: disnake.MessageInteraction,
     ):
-        if not interaction.author.guild_permissions.administrator:
+        bot = getattr(interaction, "bot", None) or interaction.client
+        if (
+            not bot.is_mi_user(interaction.author)
+            and not interaction.author.guild_permissions.administrator
+        ):
             await interaction.response.send_message(
                 "Завершать розыгрыш может только администратор.",
                 ephemeral=True,
             )
             return
 
-        bot = getattr(interaction, "bot", None) or interaction.client
         cog = bot.get_cog("GiveawayCommands")
         if not cog:
             await interaction.response.send_message(
