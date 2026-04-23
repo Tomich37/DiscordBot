@@ -211,55 +211,6 @@ class Bot(commands.Bot):
             f"форма: {_interaction_name(inter)} | заполненные поля: {filled_fields}",
         )
 
-    async def on_message_edit(self, before, after):
-        if after.author.bot:
-            return
-        self.logger.info(
-            "Изменение сообщения | "
-            f"{_format_user(after.author)} | "
-            f"{_format_guild(after.guild)} | "
-            f"{_format_channel(after.channel)} | "
-            f"сообщение ID: {after.id} | "
-            f"было: {_short_text(before.content)} | "
-            f"стало: {_short_text(after.content)}"
-        )
-
-    async def on_message_delete(self, message):
-        if message.author.bot:
-            return
-        self.logger.info(
-            "Удаление сообщения | "
-            f"{_format_user(message.author)} | "
-            f"{_format_guild(message.guild)} | "
-            f"{_format_channel(message.channel)} | "
-            f"сообщение ID: {message.id} | "
-            f"текст: {_short_text(message.content)}"
-        )
-
-    async def on_raw_reaction_add(self, payload):
-        if payload.user_id == self.user.id:
-            return
-        self.logger.info(
-            "Добавление реакции | "
-            f"пользователь ID: {payload.user_id} | "
-            f"сервер ID: {payload.guild_id} | "
-            f"канал ID: {payload.channel_id} | "
-            f"сообщение ID: {payload.message_id} | "
-            f"реакция: {payload.emoji}"
-        )
-
-    async def on_raw_reaction_remove(self, payload):
-        if payload.user_id == self.user.id:
-            return
-        self.logger.info(
-            "Удаление реакции | "
-            f"пользователь ID: {payload.user_id} | "
-            f"сервер ID: {payload.guild_id} | "
-            f"канал ID: {payload.channel_id} | "
-            f"сообщение ID: {payload.message_id} | "
-            f"реакция: {payload.emoji}"
-        )
-
     async def on_error(self, event_method, *args, **kwargs):
         self.logger.exception(f"Ошибка в событии Discord: {event_method}")
 
@@ -307,17 +258,22 @@ async def main():
     async def on_message(message):
         if message.author.bot:
             return
-        pybot.logger.info(
-            "Сообщение пользователя | "
-            f"{_format_user(message.author)} | "
-            f"{_format_guild(message.guild)} | "
-            f"{_format_channel(message.channel)} | "
-            f"сообщение ID: {message.id} | "
-            f"вложений: {len(message.attachments)} | "
-            f"текст: {_short_text(message.content)}"
-        )
+
         if pybot.is_mi_user(message.author):
+            if message.content.startswith("e!"):
+                pybot.logger.info(
+                    "Prefix-команда | "
+                    f"{_format_user(message.author)} | "
+                    f"{_format_guild(message.guild)} | "
+                    f"{_format_channel(message.channel)} | "
+                    f"сообщение ID: {message.id} | "
+                    f"команда: {_short_text(message.content)}"
+                )
             await pybot.process_commands(message)
+
+        if message.guild is None:
+            return
+
         msg_handler = Messages(logger, pybot, message)
         await msg_handler.process_message()
 
