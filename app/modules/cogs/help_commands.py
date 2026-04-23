@@ -14,6 +14,8 @@ BOT_ICON_URL = (
     "&=&format=webp&quality=lossless"
 )
 FOOTER_TEXT = "Made by the_usual_god"
+HELP_COMMANDS_PER_PAGE = 10
+CATEGORY_ORDER = ("Справка", "Утилиты", "Администрирование")
 
 
 # Единый каталог команд, чтобы общая и подробная справка не расходились.
@@ -40,7 +42,7 @@ COMMANDS_INFO = {
         ],
         "details": [
             "Поддерживает все текущие слэш-команды бота.",
-            "Также показывает описание контекстных команд для конвертации видео.",
+            "Контекстные команды и автоматические фоновые функции здесь не отображаются.",
         ],
         "admin_only": False,
     },
@@ -151,6 +153,25 @@ COMMANDS_INFO = {
         ],
         "admin_only": True,
     },
+    "giveaway_create": {
+        "title": "/giveaway_create",
+        "category": "Администрирование",
+        "kind": "Слэш-команда + модальное окно + админ-панель",
+        "short": "Создаёт розыгрыш с участием по реакции и кнопкой завершения для администрации.",
+        "params": [
+            ("channel", "Канал, где будет опубликован розыгрыш."),
+            ("emoji", "Эмодзи, по которому участники будут входить в розыгрыш."),
+        ],
+        "details": [
+            "После запуска бот открывает модальное окно с описанием розыгрыша и количеством победителей.",
+            "Бот публикует розыгрыш в выбранный канал и сразу ставит указанную реакцию.",
+            "Участники добавляются и удаляются автоматически при постановке или снятии реакции.",
+            "В канал, где вызвали команду, бот отправляет админ-панель со статистикой участников и кнопкой завершения.",
+            "Завершать розыгрыш через кнопку может только администратор.",
+            "Перед выбором победителей бот синхронизирует участников с фактическими реакциями под сообщением.",
+        ],
+        "admin_only": True,
+    },
     "add_anonimus_channel": {
         "title": "/add_anonimus_channel",
         "category": "Администрирование",
@@ -165,30 +186,6 @@ COMMANDS_INFO = {
         ],
         "admin_only": True,
     },
-    "context_convert_video": {
-        "title": "Convert Video",
-        "category": "Контекстные команды",
-        "kind": "Команда сообщения",
-        "short": "Конвертирует вложенные видео из выбранного сообщения в MOV.",
-        "params": [],
-        "details": [
-            "Вызывается через меню действий у сообщения в Discord.",
-            "Удобна, когда не хочется вручную копировать `message_id` в `/convert`.",
-        ],
-        "admin_only": False,
-    },
-    "context_convert_video_to_gif": {
-        "title": "Convert Video to GIF",
-        "category": "Контекстные команды",
-        "kind": "Команда сообщения",
-        "short": "Конвертирует вложенные видео из выбранного сообщения в GIF.",
-        "params": [],
-        "details": [
-            "Вызывается через меню действий у сообщения в Discord.",
-            "Использует те же ограничения на длительность GIF, что и `/convert`.",
-        ],
-        "admin_only": False,
-    },
 }
 
 
@@ -200,19 +197,91 @@ HELP_COMMAND_CHOICES = commands.option_enum(
 )
 
 
+class HelpPaginationView(disnake.ui.View):
+    def __init__(self, author_id: int, pages: list[disnake.Embed]) -> None:
+        self.author_id = author_id
+        self.pages = pages
+        self.current_page = 0
+        super().__init__(timeout=180)
+        self._sync_buttons()
+
+    def _sync_buttons(self) -> None:
+        has_multiple_pages = len(self.pages) > 1
+        self.previous_page.disabled = not has_multiple_pages or self.current_page == 0
+        self.next_page.disabled = (
+            not has_multiple_pages or self.current_page == len(self.pages) - 1
+        )
+
+    async def interaction_check(self, interaction: disnake.MessageInteraction) -> bool:
+        if interaction.author.id == self.author_id:
+            return True
+
+        await interaction.response.send_message(
+            "Эти кнопки относятся к чужому сообщению `/help`. Вызовите команду сами, чтобы листать свою справку.",
+            ephemeral=True,
+        )
+        return False
+
+    async def _show_current_page(self, interaction: disnake.MessageInteraction) -> None:
+        self._sync_buttons()
+        await interaction.response.edit_message(
+            embed=self.pages[self.current_page],
+            view=self,
+        )
+
+    @disnake.ui.button(
+        label="Назад",
+        style=disnake.ButtonStyle.secondary,
+        custom_id="help_previous_page",
+    )
+    async def previous_page(
+        self,
+        button: disnake.ui.Button,
+        interaction: disnake.MessageInteraction,
+    ) -> None:
+        if self.current_page > 0:
+            self.current_page -= 1
+
+        await self._show_current_page(interaction)
+
+    @disnake.ui.button(
+        label="Вперёд",
+        style=disnake.ButtonStyle.primary,
+        custom_id="help_next_page",
+    )
+    async def next_page(
+        self,
+        button: disnake.ui.Button,
+        interaction: disnake.MessageInteraction,
+    ) -> None:
+        if self.current_page < len(self.pages) - 1:
+            self.current_page += 1
+
+        await self._show_current_page(interaction)
+
+
 class Help(commands.Cog):
     def __init__(self, bot, logger) -> None:
         self.bot = bot
         self.logger = logger
 
-    def _build_embed(self, title: str, description: str = "") -> disnake.Embed:
+    def _build_embed(
+        self,
+        title: str,
+        description: str = "",
+        page_number: int | None = None,
+        total_pages: int | None = None,
+    ) -> disnake.Embed:
         embed = disnake.Embed(
             title=title,
             description=description,
             color=0x00FF00,
         )
         embed.set_author(name=BOT_NAME, url=BOT_URL, icon_url=BOT_ICON_URL)
-        embed.set_footer(text=FOOTER_TEXT)
+        if page_number is not None and total_pages is not None:
+            embed.set_footer(text=f"{FOOTER_TEXT} | Страница {page_number}/{total_pages}")
+        else:
+            embed.set_footer(text=FOOTER_TEXT)
         return embed
 
     @staticmethod
@@ -221,6 +290,64 @@ class Help(commands.Cog):
             f"**{info['title']}**{' `[админ]`' if info['admin_only'] else ''} - {info['short']}"
             for _, info in commands_info
         )
+
+    @staticmethod
+    def _get_ordered_commands() -> list[tuple[str, dict]]:
+        ordered_commands = []
+        for category in CATEGORY_ORDER:
+            ordered_commands.extend(
+                (command_key, info)
+                for command_key, info in COMMANDS_INFO.items()
+                if info["category"] == category
+            )
+
+        ordered_keys = {command_key for command_key, _ in ordered_commands}
+        ordered_commands.extend(
+            (command_key, info)
+            for command_key, info in COMMANDS_INFO.items()
+            if command_key not in ordered_keys
+        )
+        return ordered_commands
+
+    @staticmethod
+    def _chunk_commands(
+        commands_info: list[tuple[str, dict]],
+    ) -> list[list[tuple[str, dict]]]:
+        return [
+            commands_info[index:index + HELP_COMMANDS_PER_PAGE]
+            for index in range(0, len(commands_info), HELP_COMMANDS_PER_PAGE)
+        ]
+
+    def _build_help_pages(self) -> list[disnake.Embed]:
+        command_chunks = self._chunk_commands(self._get_ordered_commands())
+        total_pages = len(command_chunks)
+        pages = []
+
+        for page_index, command_chunk in enumerate(command_chunks, start=1):
+            embed = self._build_embed(
+                title="Помощь по командам бота",
+                description=(
+                    "Здесь собраны только команды, которые можно вызвать через слэш. "
+                    "Для подробностей по конкретной команде используйте `/help_command`."
+                ),
+                page_number=page_index,
+                total_pages=total_pages,
+            )
+            grouped_commands: dict[str, list[tuple[str, dict]]] = {}
+            for command_key, info in command_chunk:
+                grouped_commands.setdefault(info["category"], []).append((command_key, info))
+
+            for category in CATEGORY_ORDER:
+                category_commands = grouped_commands.get(category, [])
+                if category_commands:
+                    embed.add_field(
+                        name=category,
+                        value=self._format_section(category_commands),
+                        inline=False,
+                    )
+
+            pages.append(embed)
+        return pages
 
     @commands.slash_command(
         name="help",
@@ -233,28 +360,9 @@ class Help(commands.Cog):
         """
         Помощь по боту.
         """
-        embed = self._build_embed(
-            title="Помощь по командам и функциям бота",
-            description=(
-                "Ниже собраны все текущие команды и встроенные функции бота. "
-                "Для подробностей по конкретной команде используйте `/help_command`."
-            ),
-        )
-
-        grouped_commands: dict[str, list[tuple[str, dict]]] = {}
-        for command_key, info in COMMANDS_INFO.items():
-            grouped_commands.setdefault(info["category"], []).append((command_key, info))
-
-        for category in ("Справка", "Утилиты", "Администрирование", "Контекстные команды"):
-            commands_info = grouped_commands.get(category, [])
-            if commands_info:
-                embed.add_field(
-                    name=category,
-                    value=self._format_section(commands_info),
-                    inline=False,
-                )
-                
-        await inter.response.send_message(embed=embed)
+        pages = self._build_help_pages()
+        view = HelpPaginationView(author_id=inter.author.id, pages=pages)
+        await inter.response.send_message(embed=pages[0], view=view)
 
     @commands.slash_command(
         name="help_command",
