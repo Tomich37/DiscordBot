@@ -50,7 +50,7 @@ class GiveawayCommands(commands.Cog):
                 f"Ошибка при открытии окна создания розыгрыша: {e}",
                 ephemeral=True,
             )
-            self.logger.error(f"Ошибка в giveaway_commands/giveaway_create: {e}")
+            self.logger.exception(f"Ошибка в giveaway_commands/giveaway_create: {e}")
             print(f"Ошибка в giveaway_commands/giveaway_create: {e}")
 
     async def finish_giveaway_from_admin_panel(
@@ -110,7 +110,7 @@ class GiveawayCommands(commands.Cog):
                 f"Ошибка при завершении розыгрыша: {e}",
                 ephemeral=True,
             )
-            self.logger.error(f"Ошибка в giveaway_commands/giveaway_finish: {e}")
+            self.logger.exception(f"Ошибка в giveaway_commands/giveaway_finish: {e}")
             print(f"Ошибка в giveaway_commands/giveaway_finish: {e}")
 
     @commands.Cog.listener()
@@ -200,7 +200,7 @@ class GiveawayCommands(commands.Cog):
         except disnake.NotFound:
             return
         except Exception as e:
-            self.logger.error(f"Ошибка в giveaway_commands/_update_admin_panel: {e}")
+            self.logger.exception(f"Ошибка в giveaway_commands/_update_admin_panel: {e}")
             print(f"Ошибка в giveaway_commands/_update_admin_panel: {e}")
 
     @staticmethod

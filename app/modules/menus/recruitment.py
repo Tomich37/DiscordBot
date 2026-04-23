@@ -35,7 +35,7 @@ class RecruitmentSelect(disnake.ui.StringSelect):
                 RecruitementModal(interaction.values[0], interaction.guild.id, self.logger)
             )
         except Exception as e:
-            self.logger.error(f"Ошибка в menus/recruitment: {e}")
+            self.logger.exception(f"Ошибка в menus/recruitment: {e}")
             print(f"Ошибка в menus/recruitment: {e}")
 
 

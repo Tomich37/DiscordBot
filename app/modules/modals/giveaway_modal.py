@@ -126,7 +126,7 @@ class GiveawayModal(disnake.ui.Modal):
             if giveaway_message:
                 await giveaway_message.delete()
 
-            self.logger.error(f"Ошибка в modals/giveaway_modal: {e}")
+            self.logger.exception(f"Ошибка в modals/giveaway_modal: {e}")
             print(f"Ошибка в modals/giveaway_modal: {e}")
             if not interaction.response.is_done():
                 await interaction.response.send_message(

@@ -31,4 +31,4 @@ class Messages:
                 self.db.update_message_statistic(channel_id=channel_id, today=today)
         except Exception as e:
             print(f"Ошибка в messages/process_message: {e}")
-            self.logger.error(f"Ошибка в messages/process_message: {e}")
+            self.logger.exception(f"Ошибка в messages/process_message: {e}")

@@ -126,5 +126,5 @@ class RecruitmentSetupModal(disnake.ui.Modal):
                 ephemeral=True,
             )
         except Exception as e:
-            self.logger.error(f"Ошибка в modals/recruitment_setup_modal: {e}")
+            self.logger.exception(f"Ошибка в modals/recruitment_setup_modal: {e}")
             print(f"Ошибка в modals/recruitment_setup_modal: {e}")
