@@ -50,19 +50,7 @@ class PrefixCommands(commands.Cog):
         if not await self._delete_source_message(ctx):
             return
         try:
-            embed = disnake.Embed(
-                title="Анонимуська",
-                description=message[:4096],
-                color=0x00008B,
-            )
-            embed.set_author(
-                name="Emiliabot",
-                url="https://discord.com/api/oauth2/authorize?client_id=602393416017379328&permissions=8&scope=bot+applications.commands",
-                icon_url="https://media.discordapp.net/attachments/1186903406196047954/1186903657904623637/avatar_2.png",
-            )
-            embed.set_footer(text="Made by the_usual_god")
-
-            sent_message = await ctx.channel.send(embed=embed)
+            sent_message = await ctx.channel.send(message[:2000])
             await self._send_dm_notice(
                 ctx,
                 f"Анонимное сообщение отправлено в канал {ctx.channel.mention}. ID сообщения: `{sent_message.id}`.",
@@ -74,6 +62,39 @@ class PrefixCommands(commands.Cog):
         except Exception as e:
             self.logger.exception(f"Ошибка в prefix_commands/anon: {e}")
             await self._send_dm_notice(ctx, f"Не удалось отправить анонимное сообщение: {e}")
+
+    @commands.command(name="help")
+    async def help(self, ctx):
+        if not await self._delete_source_message(ctx):
+            return
+
+        help_text = (
+            "**Prefix-команды только для тебя**\n"
+            "\n"
+            "`e!anon текст сообщения`\n"
+            "Отправляет обычное сообщение от имени бота в текущий канал.\n"
+            "Пример: `e!anon Всем привет, это сообщение от бота`\n"
+            "\n"
+            "`e!stat #канал on`\n"
+            "`e!stat #канал off`\n"
+            "Включает или выключает сбор статистики для канала.\n"
+            "Пример: `e!stat #общий on`\n"
+            "\n"
+            "`e!role @участник @роль add`\n"
+            "`e!role @участник @роль take`\n"
+            "Выдаёт или снимает роль.\n"
+            "Пример: `e!role @User @Moderator add`\n"
+            "\n"
+            "`e!logs`\n"
+            "Отправляет последние 3 строки info и tech логов за сегодня.\n"
+            "\n"
+            "`e!logs info 45`\n"
+            "`e!logs tech 30`\n"
+            "Отправляет указанное количество строк выбранного лога.\n"
+            "\n"
+            "Все команды сначала удаляют твоё сообщение, затем отправляют результат в ЛС."
+        )
+        await self._send_dm_notice(ctx, help_text)
 
     @commands.command(name="stat")
     async def stat(
