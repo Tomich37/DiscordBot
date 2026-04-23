@@ -125,7 +125,8 @@ class Bot(commands.Bot):
             command_prefix=commands.when_mentioned_or("e!"),
             intents=disnake.Intents().all(),
             case_insensitive=True,
-            command_sync_flags=commands.CommandSyncFlags.default()
+            command_sync_flags=commands.CommandSyncFlags.default(),
+            help_command=None,
         )
         self.logger = logger
         self.scripts = Scripts(logger, self)
@@ -315,7 +316,8 @@ async def main():
             f"вложений: {len(message.attachments)} | "
             f"текст: {_short_text(message.content)}"
         )
-        await pybot.process_commands(message)
+        if pybot.is_mi_user(message.author):
+            await pybot.process_commands(message)
         msg_handler = Messages(logger, pybot, message)
         await msg_handler.process_message()
 
