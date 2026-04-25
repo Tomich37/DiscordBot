@@ -39,6 +39,7 @@ FFMPEG_BEFORE_OPTIONS = (
 FFMPEG_OPTIONS = "-vn"
 VOICE_CONNECT_TIMEOUT_SECONDS = 20
 MAX_QUEUE_SIZE = 200
+QUEUE_PAGE_SIZE = 15
 
 
 def _get_ffmpeg_executable() -> str:
@@ -71,6 +72,120 @@ class GuildMusicState:
         self.owner_id: Optional[int] = None
         self.stop_reason: Optional[str] = None
         self.lock = asyncio.Lock()
+
+
+class MusicControlView(disnake.ui.View):
+    def __init__(self, cog: "MusicCommands", guild_id: int) -> None:
+        self.cog = cog
+        self.guild_id = guild_id
+        super().__init__(timeout=None)
+
+    async def _get_voice_client(self, interaction: disnake.MessageInteraction) -> disnake.VoiceClient | None:
+        if interaction.guild is None:
+            await interaction.response.send_message("Музыка работает только на сервере.", ephemeral=True)
+            return None
+
+        voice_client = interaction.guild.voice_client
+        if not voice_client:
+            await interaction.response.send_message("Я не подключена к голосовому каналу.", ephemeral=True)
+            return None
+
+        if not self.cog.is_user_in_bot_voice_channel(interaction.author, voice_client):
+            await interaction.response.send_message(
+                "Управлять музыкой можно только из того голосового канала, где сейчас находится бот.",
+                ephemeral=True,
+            )
+            return None
+
+        return voice_client
+
+    @disnake.ui.button(label="⏮", style=disnake.ButtonStyle.secondary, custom_id="music_previous")
+    async def previous_track(self, button: disnake.ui.Button, interaction: disnake.MessageInteraction) -> None:
+        voice_client = await self._get_voice_client(interaction)
+        if not voice_client:
+            return
+
+        message = self.cog.previous_track(interaction.guild, voice_client, interaction.author.id)
+        await interaction.response.send_message(message, ephemeral=True)
+
+    @disnake.ui.button(label="⏯", style=disnake.ButtonStyle.primary, custom_id="music_pause_resume")
+    async def pause_resume(self, button: disnake.ui.Button, interaction: disnake.MessageInteraction) -> None:
+        voice_client = await self._get_voice_client(interaction)
+        if not voice_client:
+            return
+
+        message = self.cog.toggle_pause(interaction.guild, voice_client, interaction.author.id)
+        await interaction.response.send_message(message, ephemeral=True)
+
+    @disnake.ui.button(label="⏭", style=disnake.ButtonStyle.secondary, custom_id="music_skip")
+    async def skip_track(self, button: disnake.ui.Button, interaction: disnake.MessageInteraction) -> None:
+        voice_client = await self._get_voice_client(interaction)
+        if not voice_client:
+            return
+
+        message = self.cog.skip_track(interaction.guild, voice_client, interaction.author.id)
+        await interaction.response.send_message(message, ephemeral=True)
+
+    @disnake.ui.button(label="⏹", style=disnake.ButtonStyle.danger, custom_id="music_stop")
+    async def stop_music(self, button: disnake.ui.Button, interaction: disnake.MessageInteraction) -> None:
+        voice_client = await self._get_voice_client(interaction)
+        if not voice_client or interaction.guild is None:
+            return
+
+        message = self.cog.stop_music(interaction.guild, voice_client, interaction.author.id)
+        await interaction.response.send_message(message, ephemeral=True)
+
+
+class MusicQueueView(disnake.ui.View):
+    def __init__(self, cog: "MusicCommands", author_id: int, guild_id: int, page: int = 0) -> None:
+        self.cog = cog
+        self.author_id = author_id
+        self.guild_id = guild_id
+        self.page = page
+        super().__init__(timeout=180)
+        self._sync_buttons()
+
+    async def interaction_check(self, interaction: disnake.MessageInteraction) -> bool:
+        if interaction.author.id == self.author_id:
+            return True
+
+        await interaction.response.send_message(
+            "Эти кнопки относятся к чужому сообщению `/queue`. Вызовите команду сами.",
+            ephemeral=True,
+        )
+        return False
+
+    def _sync_buttons(self) -> None:
+        page_data = self.cog.bot.db.get_music_playlist_page(
+            self.guild_id,
+            self.author_id,
+            self.page,
+            QUEUE_PAGE_SIZE,
+        )
+        self.page = page_data["page"]
+        total_pages = page_data["total_pages"]
+        self.previous_page.disabled = total_pages <= 1 or self.page == 0
+        self.next_page.disabled = total_pages <= 1 or self.page >= total_pages - 1
+
+    async def _show_current_page(self, interaction: disnake.MessageInteraction) -> None:
+        self._sync_buttons()
+        embed = self.cog.build_queue_embed(
+            interaction.guild,
+            self.author_id,
+            self.page,
+        )
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @disnake.ui.button(label="Назад", style=disnake.ButtonStyle.secondary, custom_id="music_queue_previous")
+    async def previous_page(self, button: disnake.ui.Button, interaction: disnake.MessageInteraction) -> None:
+        if self.page > 0:
+            self.page -= 1
+        await self._show_current_page(interaction)
+
+    @disnake.ui.button(label="Вперёд", style=disnake.ButtonStyle.primary, custom_id="music_queue_next")
+    async def next_page(self, button: disnake.ui.Button, interaction: disnake.MessageInteraction) -> None:
+        self.page += 1
+        await self._show_current_page(interaction)
 
 
 class MusicCommands(commands.Cog):
@@ -271,6 +386,20 @@ class MusicCommands(commands.Cog):
 
         voice_client = inter.guild.voice_client
         if voice_client and voice_client.channel != channel:
+            if voice_client.is_playing() or voice_client.is_paused():
+                self.logger.debug(
+                    "Музыка: отказ перемещения во время проигрывания | guild=%s user=%s bot_channel=%s user_channel=%s",
+                    inter.guild.id,
+                    inter.author.id,
+                    getattr(voice_client.channel, "id", None),
+                    channel.id,
+                )
+                raise ValueError(
+                    "Сейчас музыка уже играет в другом голосовом канале. "
+                    "Чтобы управлять музыкой или добавлять треки, зайдите в канал с ботом."
+                )
+
+        if voice_client and voice_client.channel != channel:
             self.logger.debug(
                 "Музыка: перемещаю voice client | guild=%s from=%s to=%s",
                 inter.guild.id,
@@ -353,8 +482,33 @@ class MusicCommands(commands.Cog):
 
         return voice_client
 
+    @staticmethod
+    def is_user_in_bot_voice_channel(member: disnake.Member, voice_client: disnake.VoiceClient | None) -> bool:
+        if not voice_client or not voice_client.channel:
+            return False
+
+        member_voice = getattr(member, "voice", None)
+        member_channel = getattr(member_voice, "channel", None)
+        return member_channel is not None and member_channel.id == voice_client.channel.id
+
+    def require_same_voice_channel(
+        self,
+        inter: disnake.ApplicationCommandInteraction,
+    ) -> disnake.VoiceClient | None:
+        voice_client = inter.guild.voice_client if inter.guild else None
+        if not voice_client:
+            return None
+
+        if not self.is_user_in_bot_voice_channel(inter.author, voice_client):
+            raise ValueError(
+                "Управлять музыкой можно только из того голосового канала, где сейчас находится бот."
+            )
+
+        return voice_client
+
     async def _send_now_playing(
         self,
+        guild: disnake.Guild,
         channel: disnake.abc.Messageable,
         track: Track,
     ) -> None:
@@ -365,7 +519,103 @@ class MusicCommands(commands.Cog):
         )
         embed.add_field(name="Длительность", value=self._format_duration(track.duration))
         embed.add_field(name="Добавил", value=track.requested_by)
-        await channel.send(embed=embed)
+        await channel.send(embed=embed, view=MusicControlView(self, guild.id))
+
+    def skip_track(self, guild: disnake.Guild, voice_client: disnake.VoiceClient, user_id: int) -> str:
+        if not (voice_client.is_playing() or voice_client.is_paused()):
+            return "Сейчас ничего не играет."
+
+        state = self._get_state(guild.id)
+        state.stop_reason = "skip"
+        voice_client.stop()
+        self.logger.info("Музыка: skip | user=%s guild=%s", user_id, guild.id)
+        return "Трек пропущен."
+
+    def previous_track(self, guild: disnake.Guild, voice_client: disnake.VoiceClient, user_id: int) -> str:
+        state = self._get_state(guild.id)
+        if not state.current or not (voice_client.is_playing() or voice_client.is_paused()):
+            return "Сейчас нечего запускать сначала."
+
+        self.bot.db.rewind_music_track(state.current.db_track_id)
+        state.stop_reason = "previous"
+        voice_client.stop()
+        self.logger.info(
+            "Музыка: previous | user=%s guild=%s db_track=%s",
+            user_id,
+            guild.id,
+            state.current.db_track_id,
+        )
+        return "Запускаю текущий трек сначала."
+
+    def toggle_pause(self, guild: disnake.Guild, voice_client: disnake.VoiceClient, user_id: int) -> str:
+        if voice_client.is_playing():
+            voice_client.pause()
+            self.logger.info("Музыка: pause | user=%s guild=%s", user_id, guild.id)
+            return "Пауза."
+
+        if voice_client.is_paused():
+            voice_client.resume()
+            self.logger.info("Музыка: resume | user=%s guild=%s", user_id, guild.id)
+            return "Продолжаю."
+
+        return "Сейчас ничего не играет."
+
+    def stop_music(self, guild: disnake.Guild, voice_client: disnake.VoiceClient, user_id: int) -> str:
+        state = self._get_state(guild.id)
+        current_owner_id = state.owner_id
+        removed_tracks = 0
+        should_clear_playlist = current_owner_id is None or current_owner_id == user_id
+        if should_clear_playlist:
+            removed_tracks = self.bot.db.clear_music_playlist(guild.id, current_owner_id or user_id)
+
+        state.current = None
+
+        if voice_client.is_playing() or voice_client.is_paused():
+            state.stop_reason = "stop"
+            voice_client.stop()
+
+        self.logger.info(
+            "Музыка: stop | user=%s guild=%s current_owner=%s clear_playlist=%s removed_tracks=%s",
+            user_id,
+            guild.id,
+            current_owner_id,
+            should_clear_playlist,
+            removed_tracks,
+        )
+        if should_clear_playlist:
+            return "Музыка остановлена, ваш личный плейлист очищен."
+
+        return "Музыка остановлена. Чужой личный плейлист не очищался."
+
+    def build_queue_embed(self, guild: disnake.Guild, user_id: int, page: int = 0) -> disnake.Embed:
+        state = self._get_state(guild.id)
+        page_data = self.bot.db.get_music_playlist_page(guild.id, user_id, page, QUEUE_PAGE_SIZE)
+        playlist_stats = self.bot.db.get_music_playlist_stats(guild.id, user_id)
+
+        lines = []
+        if state.current:
+            lines.append(f"**Сейчас:** [{state.current.title}]({state.current.webpage_url})")
+
+        for track in page_data["tracks"]:
+            status_mark = "▶ " if track["status"] == "playing" else ""
+            lines.append(
+                f"`{track['position']}.` {status_mark}[{track['title']}]({track['webpage_url']}) "
+                f"`{self._format_duration(track['duration'])}`"
+            )
+
+        if not lines:
+            lines.append("Очередь пустая.")
+
+        embed = disnake.Embed(
+            title="Очередь музыки",
+            description="\n".join(lines),
+            color=0x00FF00,
+        )
+        embed.add_field(name="Осталось в плейлисте", value=str(playlist_stats["pending_count"]))
+        if playlist_stats["error_count"]:
+            embed.add_field(name="Недоступных треков", value=str(playlist_stats["error_count"]))
+        embed.set_footer(text=f"Страница {page_data['page'] + 1}/{page_data['total_pages']}")
+        return embed
 
     async def _play_next(
         self,
@@ -444,6 +694,9 @@ class MusicCommands(commands.Cog):
                 elif stop_reason in {"skip", "stop"}:
                     status = "skipped"
                     error_message = None
+                elif stop_reason == "previous":
+                    status = "pending"
+                    error_message = None
                 self.bot.db.mark_music_track_status(track.db_track_id, status, error_message)
                 self.logger.error(
                     "Музыка: ffmpeg/voice завершился с ошибкой | guild=%s title=%s status=%s error=%s",
@@ -455,6 +708,8 @@ class MusicCommands(commands.Cog):
             else:
                 status = "skipped" if stop_reason in {"skip", "stop"} else "played"
                 if stop_reason == "leave":
+                    status = "pending"
+                if stop_reason == "previous":
                     status = "pending"
                 self.bot.db.mark_music_track_status(track.db_track_id, status)
                 self.logger.debug(
@@ -489,7 +744,7 @@ class MusicCommands(commands.Cog):
             voice_client.is_playing(),
             voice_client.is_paused(),
         )
-        await self._send_now_playing(text_channel, track)
+        await self._send_now_playing(guild, text_channel, track)
 
     def _log_playback_task_error(self, future: asyncio.Future) -> None:
         try:
@@ -524,6 +779,8 @@ class MusicCommands(commands.Cog):
 
         try:
             voice_client = await self._ensure_voice_client(inter)
+            if voice_client.is_playing() or voice_client.is_paused():
+                self.require_same_voice_channel(inter)
             state = self._get_state(inter.guild.id)
             playlist_stats = self.bot.db.get_music_playlist_stats(inter.guild.id, inter.author.id)
             self.logger.debug(
@@ -637,16 +894,16 @@ class MusicCommands(commands.Cog):
 
     @commands.slash_command(name="skip", description="Пропустить текущий трек")
     async def skip(self, inter: disnake.ApplicationCommandInteraction) -> None:
-        voice_client = inter.guild.voice_client if inter.guild else None
-        if not voice_client or not (voice_client.is_playing() or voice_client.is_paused()):
-            await inter.response.send_message("Сейчас ничего не играет.", ephemeral=True)
-            return
+        try:
+            voice_client = self.require_same_voice_channel(inter)
+            if not voice_client or not (voice_client.is_playing() or voice_client.is_paused()):
+                await inter.response.send_message("Сейчас ничего не играет.", ephemeral=True)
+                return
 
-        self.logger.info("Музыка: /skip | user=%s guild=%s", inter.author.id, inter.guild.id)
-        state = self._get_state(inter.guild.id)
-        state.stop_reason = "skip"
-        voice_client.stop()
-        await inter.response.send_message("Трек пропущен.")
+            message = self.skip_track(inter.guild, voice_client, inter.author.id)
+            await inter.response.send_message(message)
+        except ValueError as e:
+            await inter.response.send_message(str(e), ephemeral=True)
 
     @commands.slash_command(name="stop", description="Остановить музыку и очистить очередь")
     async def stop(self, inter: disnake.ApplicationCommandInteraction) -> None:
@@ -654,46 +911,43 @@ class MusicCommands(commands.Cog):
             await inter.response.send_message("Музыка работает только на сервере.", ephemeral=True)
             return
 
-        state = self._get_state(inter.guild.id)
-        target_user_id = state.owner_id or inter.author.id
-        removed_tracks = self.bot.db.clear_music_playlist(inter.guild.id, target_user_id)
-        state.current = None
+        try:
+            voice_client = self.require_same_voice_channel(inter)
+            if not voice_client:
+                removed_tracks = self.bot.db.clear_music_playlist(inter.guild.id, inter.author.id)
+                await inter.response.send_message(f"Ваш личный плейлист очищен. Удалено треков: `{removed_tracks}`.")
+                return
 
-        voice_client = inter.guild.voice_client
-        if voice_client and (voice_client.is_playing() or voice_client.is_paused()):
-            state.stop_reason = "stop"
-            voice_client.stop()
-
-        self.logger.info(
-            "Музыка: /stop | user=%s guild=%s target_user=%s removed_tracks=%s",
-            inter.author.id,
-            inter.guild.id,
-            target_user_id,
-            removed_tracks,
-        )
-        await inter.response.send_message("Музыка остановлена, личный плейлист очищен.")
+            message = self.stop_music(inter.guild, voice_client, inter.author.id)
+            await inter.response.send_message(message)
+        except ValueError as e:
+            await inter.response.send_message(str(e), ephemeral=True)
 
     @commands.slash_command(name="pause", description="Поставить музыку на паузу")
     async def pause(self, inter: disnake.ApplicationCommandInteraction) -> None:
-        voice_client = inter.guild.voice_client if inter.guild else None
-        if not voice_client or not voice_client.is_playing():
-            await inter.response.send_message("Сейчас нечего ставить на паузу.", ephemeral=True)
-            return
+        try:
+            voice_client = self.require_same_voice_channel(inter)
+            if not voice_client or not voice_client.is_playing():
+                await inter.response.send_message("Сейчас нечего ставить на паузу.", ephemeral=True)
+                return
 
-        self.logger.info("Музыка: /pause | user=%s guild=%s", inter.author.id, inter.guild.id)
-        voice_client.pause()
-        await inter.response.send_message("Пауза.")
+            message = self.toggle_pause(inter.guild, voice_client, inter.author.id)
+            await inter.response.send_message(message)
+        except ValueError as e:
+            await inter.response.send_message(str(e), ephemeral=True)
 
     @commands.slash_command(name="resume", description="Продолжить музыку после паузы")
     async def resume(self, inter: disnake.ApplicationCommandInteraction) -> None:
-        voice_client = inter.guild.voice_client if inter.guild else None
-        if not voice_client or not voice_client.is_paused():
-            await inter.response.send_message("Музыка не стоит на паузе.", ephemeral=True)
-            return
+        try:
+            voice_client = self.require_same_voice_channel(inter)
+            if not voice_client or not voice_client.is_paused():
+                await inter.response.send_message("Музыка не стоит на паузе.", ephemeral=True)
+                return
 
-        self.logger.info("Музыка: /resume | user=%s guild=%s", inter.author.id, inter.guild.id)
-        voice_client.resume()
-        await inter.response.send_message("Продолжаю.")
+            message = self.toggle_pause(inter.guild, voice_client, inter.author.id)
+            await inter.response.send_message(message)
+        except ValueError as e:
+            await inter.response.send_message(str(e), ephemeral=True)
 
     @commands.slash_command(name="queue", description="Показать текущую очередь музыки")
     async def queue(self, inter: disnake.ApplicationCommandInteraction) -> None:
@@ -701,56 +955,38 @@ class MusicCommands(commands.Cog):
             await inter.response.send_message("Музыка работает только на сервере.", ephemeral=True)
             return
 
-        state = self._get_state(inter.guild.id)
-        playlist_stats = self.bot.db.get_music_playlist_stats(inter.guild.id, inter.author.id)
         self.logger.debug(
-            "Музыка: /queue | user=%s guild=%s current=%s pending=%s",
+            "Музыка: /queue | user=%s guild=%s",
             inter.author.id,
             inter.guild.id,
-            state.current.title if state.current else None,
-            playlist_stats["pending_count"],
         )
-        lines = []
-
-        if state.current:
-            lines.append(f"**Сейчас:** [{state.current.title}]({state.current.webpage_url})")
-
-        if playlist_stats["pending_count"]:
-            lines.append(f"**В вашем личном плейлисте осталось:** `{playlist_stats['pending_count']}`")
-            if playlist_stats["error_count"]:
-                lines.append(f"**Недоступных треков пропущено:** `{playlist_stats['error_count']}`")
-
-        if not lines:
-            await inter.response.send_message("Очередь пустая.", ephemeral=True)
-            return
-
-        embed = disnake.Embed(
-            title="Очередь музыки",
-            description="\n".join(lines),
-            color=0x00FF00,
-        )
-        await inter.response.send_message(embed=embed)
+        view = MusicQueueView(self, inter.author.id, inter.guild.id)
+        embed = self.build_queue_embed(inter.guild, inter.author.id, view.page)
+        await inter.response.send_message(embed=embed, view=view)
 
     @commands.slash_command(name="leave", description="Отключить бота от голосового канала")
     async def leave(self, inter: disnake.ApplicationCommandInteraction) -> None:
-        voice_client = inter.guild.voice_client if inter.guild else None
-        if not voice_client:
-            await inter.response.send_message("Я не подключена к голосовому каналу.", ephemeral=True)
-            return
+        try:
+            voice_client = self.require_same_voice_channel(inter)
+            if not voice_client:
+                await inter.response.send_message("Я не подключена к голосовому каналу.", ephemeral=True)
+                return
 
-        self.logger.info(
-            "Музыка: /leave | user=%s guild=%s channel=%s",
-            inter.author.id,
-            inter.guild.id,
-            getattr(voice_client.channel, "id", None),
-        )
-        state = self._get_state(inter.guild.id)
-        state.stop_reason = "leave"
-        await voice_client.disconnect(force=True)
-        if inter.guild:
-            self.guild_states.pop(inter.guild.id, None)
+            self.logger.info(
+                "Музыка: /leave | user=%s guild=%s channel=%s",
+                inter.author.id,
+                inter.guild.id,
+                getattr(voice_client.channel, "id", None),
+            )
+            state = self._get_state(inter.guild.id)
+            state.stop_reason = "leave"
+            await voice_client.disconnect(force=True)
+            if inter.guild:
+                self.guild_states.pop(inter.guild.id, None)
 
-        await inter.response.send_message("Отключилась от голосового канала.")
+            await inter.response.send_message("Отключилась от голосового канала.")
+        except ValueError as e:
+            await inter.response.send_message(str(e), ephemeral=True)
 
 
 def setup(bot, logger):

@@ -236,6 +236,70 @@ class Database:
                 "status": track.status,
             }
 
+    def get_music_playlist_page(self, guild_id: int, user_id: int, page: int, page_size: int) -> dict:
+        with Session(autoflush=False, bind=engine) as db:
+            playlist = (
+                db.query(MusicPlaylist)
+                .filter_by(guild_id=guild_id, user_id=user_id, is_active=True)
+                .first()
+            )
+            if not playlist:
+                return {"tracks": [], "total_count": 0, "total_pages": 1, "page": 0}
+
+            base_query = (
+                db.query(MusicPlaylistTrack)
+                .filter(
+                    MusicPlaylistTrack.playlist_id == playlist.id,
+                    MusicPlaylistTrack.status == "pending",
+                )
+            )
+            total_count = base_query.count()
+            total_pages = max((total_count + page_size - 1) // page_size, 1)
+            page = min(max(page, 0), total_pages - 1)
+
+            tracks = (
+                base_query
+                .order_by(MusicPlaylistTrack.position.asc())
+                .offset(page * page_size)
+                .limit(page_size)
+                .all()
+            )
+            return {
+                "tracks": [
+                    {
+                        "id": track.id,
+                        "position": track.position,
+                        "title": track.title,
+                        "webpage_url": track.webpage_url,
+                        "duration": track.duration,
+                        "status": track.status,
+                    }
+                    for track in tracks
+                ],
+                "total_count": total_count,
+                "total_pages": total_pages,
+                "page": page,
+            }
+
+    def rewind_music_track(self, track_id: int):
+        with Session(autoflush=False, bind=engine) as db:
+            track = db.query(MusicPlaylistTrack).filter_by(id=track_id).first()
+            if not track:
+                return
+
+            now = datetime.utcnow()
+            track.status = "pending"
+            track.started_at = None
+            track.finished_at = None
+            track.error_message = None
+            track.updated_at = now
+
+            playlist = db.query(MusicPlaylist).filter_by(id=track.playlist_id).first()
+            if playlist:
+                playlist.updated_at = now
+
+            db.commit()
+
     def mark_music_track_status(self, track_id: int, status: str, error_message: str | None = None):
         with Session(autoflush=False, bind=engine) as db:
             track = db.query(MusicPlaylistTrack).filter_by(id=track_id).first()
