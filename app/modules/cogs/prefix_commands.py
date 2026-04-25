@@ -95,6 +95,9 @@ class PrefixCommands(commands.Cog):
             "`e!logs tech 30`\n"
             "Отправляет указанное количество строк выбранного лога.\n"
             "\n"
+            "`e!servers`\n"
+            "Показывает серверы, где установлен бот, и уже существующую ссылку, если бот может её прочитать.\n"
+            "\n"
             "Все команды сначала удаляют твоё сообщение, затем отправляют результат в ЛС."
         )
         await self._send_dm_notice(ctx, help_text)
@@ -183,6 +186,99 @@ class PrefixCommands(commands.Cog):
         line_count = max(1, min(line_count, 300))
         await self._send_log_lines(ctx, log_prefix, line_count)
 
+    @commands.command(name="servers")
+    async def servers(self, ctx):
+        if not await self._delete_source_message(ctx):
+            return
+
+        guilds = sorted(self.bot.guilds, key=lambda guild: guild.name.casefold())
+        if not guilds:
+            await self._send_dm_notice(ctx, "Бот сейчас не видит ни одного сервера.")
+            return
+
+        lines = [
+            f"**Серверы, где установлен бот: {len(guilds)}**",
+            "Команда не создаёт приглашения, а только читает уже существующие ссылки, если хватает прав.",
+            "",
+        ]
+
+        for index, guild in enumerate(guilds, start=1):
+            invite_text = await self._get_existing_guild_invite_text(guild)
+            lines.extend(
+                [
+                    f"**{index}. {guild.name}**",
+                    f"ID: `{guild.id}`",
+                    f"Участников: `{guild.member_count or 'неизвестно'}`",
+                    f"Владелец: {self._format_guild_owner_for_notice(guild)}",
+                    f"Ссылка: {invite_text}",
+                    "",
+                ]
+            )
+
+        await self._send_long_dm_notice(ctx, "\n".join(lines).strip())
+
+    async def _get_existing_guild_invite_text(self, guild: disnake.Guild) -> str:
+        vanity_code = getattr(guild, "vanity_url_code", None)
+        if vanity_code:
+            return f"https://discord.gg/{vanity_code} (публичная vanity-ссылка)"
+
+        bot_member = guild.me or guild.get_member(self.bot.user.id)
+        if not bot_member:
+            return "не удалось проверить: бот не найден в кэше сервера"
+
+        if not bot_member.guild_permissions.manage_guild:
+            return "не удалось прочитать: нужно право `Управлять сервером`"
+
+        try:
+            invites = await guild.invites()
+        except disnake.Forbidden:
+            return "не удалось прочитать: у бота нет права `Управлять сервером`"
+        except disnake.HTTPException as e:
+            self.logger.warning(f"Не удалось прочитать приглашения сервера {guild.name} (ID: {guild.id}): {e}")
+            return f"не удалось прочитать: ошибка Discord API `{e}`"
+
+        if not invites:
+            return "активных приглашений нет"
+
+        invite = self._select_invite_for_notice(invites)
+        return self._format_invite_for_notice(invite)
+
+    @staticmethod
+    def _select_invite_for_notice(invites: list[disnake.Invite]) -> disnake.Invite:
+        return sorted(
+            invites,
+            key=lambda invite: (
+                bool(getattr(invite, "max_age", 0)),
+                bool(getattr(invite, "max_uses", 0)),
+                -(getattr(invite, "uses", 0) or 0),
+            ),
+        )[0]
+
+    @staticmethod
+    def _format_invite_for_notice(invite: disnake.Invite) -> str:
+        parts = [invite.url]
+
+        channel = getattr(invite, "channel", None)
+        if channel:
+            parts.append(f"канал: `#{channel.name}`")
+
+        max_age = getattr(invite, "max_age", 0) or 0
+        max_uses = getattr(invite, "max_uses", 0) or 0
+        if max_age == 0:
+            parts.append("без срока")
+        if max_uses == 0:
+            parts.append("без лимита использований")
+
+        return " | ".join(parts)
+
+    @staticmethod
+    def _format_guild_owner_for_notice(guild: disnake.Guild) -> str:
+        owner = guild.owner
+        if owner:
+            return f"`{owner}` (`{owner.id}`)"
+
+        return f"`ID: {guild.owner_id}`"
+
     async def _send_log_lines(self, ctx, log_prefix: str, line_count: int) -> None:
         log_file = self._get_today_log_file(log_prefix)
         if not log_file.exists():
@@ -251,6 +347,24 @@ class PrefixCommands(commands.Cog):
             return
 
         await self._send_dm_notice(ctx, message)
+
+    async def _send_long_dm_notice(self, ctx, message: str) -> None:
+        parts = []
+        current_part = ""
+
+        for line in message.splitlines():
+            next_part = f"{current_part}\n{line}" if current_part else line
+            if len(next_part) > 1900:
+                parts.append(current_part)
+                current_part = line
+            else:
+                current_part = next_part
+
+        if current_part:
+            parts.append(current_part)
+
+        for part in parts:
+            await self._send_dm_notice(ctx, part)
 
     @staticmethod
     def _format_channel_for_notice(channel) -> str:
