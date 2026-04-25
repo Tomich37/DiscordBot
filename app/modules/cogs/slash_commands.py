@@ -27,6 +27,7 @@ class SlashCommands(commands.Cog):
         self.sc = Scripts(logger, bot)
 
     convert_formats = commands.option_enum({"MOV": "mov", "GIF (до 10 сек)": "gif"})
+    profile_asset_types = commands.option_enum({"Пользователь": "user", "Сервер": "server"})
 
     @commands.slash_command(
         name="ping",
@@ -220,6 +221,142 @@ class SlashCommands(commands.Cog):
             )
             self.logger.exception(f"Ошибка в commands/profile: {e}")
             print(f"Ошибка в commands/profile: {e}")
+
+    def _build_asset_embed(
+        self,
+        title: str,
+        description: str,
+        image_url: str,
+        color: int = 0x5865F2,
+    ) -> disnake.Embed:
+        embed = disnake.Embed(
+            title=title,
+            description=description,
+            color=color,
+        )
+        embed.set_author(name=BOT_NAME, url=BOT_URL, icon_url=BOT_ICON_URL)
+        embed.set_image(url=image_url)
+        embed.add_field(name="Ссылка", value=f"[Открыть изображение]({image_url})", inline=False)
+        embed.set_footer(text=FOOTER_TEXT)
+        return embed
+
+    @commands.slash_command(
+        name="avatar",
+        description="Показать аватар пользователя или иконку сервера",
+        dm_permission=False,
+    )
+    async def avatar(
+        self,
+        inter: disnake.GuildCommandInteraction,
+        asset_type: profile_asset_types = "user",
+        member: disnake.Member = None,
+    ):
+        """
+        Просмотр аватара пользователя или иконки сервера.
+
+        Parameters
+        ----------
+        asset_type: Что показать: пользователя или сервер
+        member: Участник, аватар которого нужно показать. Если не указан, будет показан ваш аватар
+        """
+        try:
+            if asset_type == "server":
+                if not inter.guild.icon:
+                    await inter.response.send_message(
+                        "У этого сервера нет иконки.",
+                        ephemeral=True,
+                    )
+                    return
+
+                image_url = inter.guild.icon.with_size(4096).url
+                embed = self._build_asset_embed(
+                    title=f"Иконка сервера: {inter.guild.name}",
+                    description=f"Сервер `{inter.guild.name}`",
+                    image_url=image_url,
+                    color=0x2ECC71,
+                )
+                await inter.response.send_message(embed=embed)
+                return
+
+            target_member = member or inter.author
+            avatar_asset = target_member.display_avatar.with_size(4096)
+            embed = self._build_asset_embed(
+                title=f"Аватар: {target_member.display_name}",
+                description=f"{target_member.mention}\n`{target_member}`",
+                image_url=avatar_asset.url,
+                color=target_member.color.value or 0x5865F2,
+            )
+            await inter.response.send_message(embed=embed)
+        except Exception as e:
+            await inter.response.send_message(
+                "Не получилось получить аватар.",
+                ephemeral=True,
+            )
+            self.logger.exception(f"Ошибка в commands/avatar: {e}")
+            print(f"Ошибка в commands/avatar: {e}")
+
+    @commands.slash_command(
+        name="banner",
+        description="Показать баннер профиля или сервера",
+        dm_permission=False,
+    )
+    async def banner(
+        self,
+        inter: disnake.GuildCommandInteraction,
+        asset_type: profile_asset_types = "user",
+        member: disnake.Member = None,
+    ):
+        """
+        Просмотр баннера пользователя или сервера.
+
+        Parameters
+        ----------
+        asset_type: Что показать: пользователя или сервер
+        member: Участник, баннер которого нужно показать. Если не указан, будет показан ваш баннер
+        """
+        try:
+            if asset_type == "server":
+                if not inter.guild.banner:
+                    await inter.response.send_message(
+                        "У этого сервера нет баннера.",
+                        ephemeral=True,
+                    )
+                    return
+
+                image_url = inter.guild.banner.with_size(4096).url
+                embed = self._build_asset_embed(
+                    title=f"Баннер сервера: {inter.guild.name}",
+                    description=f"Сервер `{inter.guild.name}`",
+                    image_url=image_url,
+                    color=0x9B59B6,
+                )
+                await inter.response.send_message(embed=embed)
+                return
+
+            target_member = member or inter.author
+            user = await self.bot.fetch_user(target_member.id)
+            if not user.banner:
+                await inter.response.send_message(
+                    f"У пользователя {target_member.mention} нет баннера профиля.",
+                    ephemeral=True,
+                )
+                return
+
+            image_url = user.banner.with_size(4096).url
+            embed = self._build_asset_embed(
+                title=f"Баннер профиля: {target_member.display_name}",
+                description=f"{target_member.mention}\n`{target_member}`",
+                image_url=image_url,
+                color=target_member.color.value or 0x9B59B6,
+            )
+            await inter.response.send_message(embed=embed)
+        except Exception as e:
+            await inter.response.send_message(
+                "Не получилось получить баннер.",
+                ephemeral=True,
+            )
+            self.logger.exception(f"Ошибка в commands/banner: {e}")
+            print(f"Ошибка в commands/banner: {e}")
 
     roleMenegment = commands.option_enum({"Назначить роль": "add", "Снять роль": "take"})
 
