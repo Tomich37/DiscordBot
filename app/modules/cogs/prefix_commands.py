@@ -98,6 +98,10 @@ class PrefixCommands(commands.Cog):
             "`e!servers`\n"
             "Показывает серверы, где установлен бот, и уже существующую ссылку, если бот может её прочитать.\n"
             "\n"
+            "`e!channels`\n"
+            "`e!channels ID_сервера`\n"
+            "Показывает текстовые и голосовые каналы сервера с их ID. В ЛС нужно указать ID сервера.\n"
+            "\n"
             "Все команды сначала удаляют твоё сообщение, затем отправляют результат в ЛС."
         )
         await self._send_dm_notice(ctx, help_text)
@@ -216,6 +220,57 @@ class PrefixCommands(commands.Cog):
             )
 
         await self._send_long_dm_notice(ctx, "\n".join(lines).strip())
+
+    @commands.command(name="channels")
+    async def channels(self, ctx, guild_id: int = None):
+        if not await self._delete_source_message(ctx):
+            return
+
+        guild = await self._get_guild_for_channels_command(ctx, guild_id)
+        if not guild:
+            return
+
+        lines = [
+            f"**Каналы сервера `{guild.name}`**",
+            f"ID сервера: `{guild.id}`",
+            "",
+            "**Текстовые каналы**",
+        ]
+
+        if guild.text_channels:
+            lines.extend(self._format_channels_for_notice(guild.text_channels))
+        else:
+            lines.append("Нет текстовых каналов.")
+
+        lines.extend(["", "**Голосовые каналы**"])
+        if guild.voice_channels:
+            lines.extend(self._format_channels_for_notice(guild.voice_channels))
+        else:
+            lines.append("Нет голосовых каналов.")
+
+        await self._send_long_dm_notice(ctx, "\n".join(lines).strip())
+
+    async def _get_guild_for_channels_command(self, ctx, guild_id: int = None):
+        if guild_id is None and ctx.guild is not None:
+            return ctx.guild
+
+        if guild_id is None:
+            await self._send_dm_notice(ctx, "В ЛС нужно указать ID сервера: `e!channels ID_сервера`.")
+            return None
+
+        guild = self.bot.get_guild(guild_id)
+        if guild:
+            return guild
+
+        await self._send_dm_notice(ctx, f"Бот не видит сервер с ID `{guild_id}`. Проверь ID через `e!servers`.")
+        return None
+
+    @staticmethod
+    def _format_channels_for_notice(channels) -> list[str]:
+        return [
+            f"• `{channel.name}` — `{channel.id}`"
+            for channel in sorted(channels, key=lambda channel: channel.position)
+        ]
 
     async def _get_existing_guild_invite_text(self, guild: disnake.Guild) -> str:
         vanity_code = getattr(guild, "vanity_url_code", None)
