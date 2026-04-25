@@ -3,6 +3,65 @@ import logging
 from datetime import date, datetime, timedelta
 
 
+def fix_text_mojibake(text: str) -> str:
+    if not isinstance(text, str):
+        return text
+
+    fixed = _decode_mojibake_variant(text, "cp874")
+    if fixed != text:
+        return fixed
+
+    return _decode_mojibake_variant(text, "cp1251")
+
+
+def _decode_mojibake_variant(text: str, encoding: str) -> str:
+    try:
+        raw_bytes = _encode_mojibake_bytes(text, encoding)
+        fixed = raw_bytes.decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return text
+
+    return fixed if _mojibake_score(fixed) < _mojibake_score(text) else text
+
+
+def _encode_mojibake_bytes(text: str, encoding: str) -> bytes:
+    chunks = bytearray()
+    for char in text:
+        codepoint = ord(char)
+        if 0x80 <= codepoint <= 0x9F:
+            chunks.append(codepoint)
+            continue
+
+        chunks.extend(char.encode(encoding))
+
+    return bytes(chunks)
+
+
+def _mojibake_score(text: str) -> int:
+    # Чем больше в строке служебных и тайских символов, тем вероятнее сломанная UTF-8 строка.
+    cp1251_fragments = ("Рќ", "Рµ", "С…", "Р°", "Рё", "Рѕ", "СЃ", "С‚", "СЊ", "Р»")
+    cp1251_mojibake = sum(text.count(fragment) for fragment in cp1251_fragments)
+    thai_chars = sum("\u0e00" <= char <= "\u0e7f" for char in text)
+    c1_controls = sum("\u0080" <= char <= "\u009f" for char in text)
+    replacement_chars = text.count("\ufffd")
+    cyrillic_chars = sum("\u0400" <= char <= "\u04ff" for char in text)
+    return thai_chars * 3 + c1_controls * 4 + replacement_chars * 5 + cp1251_mojibake * 3 - cyrillic_chars
+
+
+class Utf8SafeFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        original_msg = record.msg
+        original_args = record.args
+
+        try:
+            record.msg = fix_text_mojibake(record.getMessage())
+            record.args = ()
+            return super().format(record)
+        finally:
+            record.msg = original_msg
+            record.args = original_args
+
+
 class LevelFilter(logging.Filter):
     def __init__(self, allowed_levels: set[int]) -> None:
         super().__init__()
@@ -83,7 +142,7 @@ class SetLogs:
         log_format = "%(asctime)s - %(levelname)s - %(message)s"
         date_format = "%Y-%m-%d %H:%M:%S"
 
-        formatter = logging.Formatter(log_format, datefmt=date_format)
+        formatter = Utf8SafeFormatter(log_format, datefmt=date_format)
         self.logger = logging.getLogger("discord_bot")
         self.logger.setLevel(logging.DEBUG)
         self.logger.propagate = False

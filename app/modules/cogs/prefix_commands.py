@@ -6,6 +6,7 @@ import disnake
 from disnake.ext import commands
 
 from app.modules.database import Database
+from app.modules.logger import fix_text_mojibake
 
 
 class PrefixCommands(commands.Cog):
@@ -562,7 +563,7 @@ class PrefixCommands(commands.Cog):
     def _read_last_lines(log_file: Path, line_count: int) -> list[str]:
         with log_file.open("r", encoding="utf-8") as file:
             lines = file.readlines()
-        return lines[-line_count:]
+        return [fix_text_mojibake(line) for line in lines[-line_count:]]
 
     async def _send_logs_to_dm(self, ctx, title: str, content: str) -> None:
         try:
