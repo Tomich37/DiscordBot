@@ -571,7 +571,8 @@ class PrefixCommands(commands.Cog):
                 await ctx.author.send(f"**{title}**\n```text\n{content}```")
                 return
 
-            file_bytes = BytesIO(content.encode("utf-8"))
+            # BOM помогает Discord и редакторам безошибочно распознать UTF-8 в предпросмотре файла.
+            file_bytes = BytesIO(content.encode("utf-8-sig"))
             file_bytes.seek(0)
             await ctx.author.send(
                 content=f"**{title}**",
