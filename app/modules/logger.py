@@ -1,5 +1,6 @@
 import os
 import logging
+import sys
 from datetime import date, datetime, timedelta
 
 
@@ -136,7 +137,10 @@ class DailyFileHandler(logging.Handler):
 class SetLogs:
     def __init__(self) -> None:
         # Логи делим по назначению и по дням, чтобы проще искать пользовательские и технические события.
-        logs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
+        logs_dir = os.getenv(
+            "LOGS_DIR",
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs"),
+        )
         os.makedirs(logs_dir, exist_ok=True)
 
         log_format = "%(asctime)s - %(levelname)s - %(message)s"
@@ -168,5 +172,19 @@ class SetLogs:
         )
         technical_handler.setFormatter(formatter)
 
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setLevel(logging.DEBUG)
+        console_handler.setFormatter(formatter)
+
         self.logger.addHandler(info_handler)
         self.logger.addHandler(technical_handler)
+        self.logger.addHandler(console_handler)
+
+        # Voice-подключение и ffmpeg живут внутри disnake, поэтому отдельно пишем их debug в technical.
+        for logger_name in ("disnake.voice_client", "disnake.player", "disnake.gateway"):
+            external_logger = logging.getLogger(logger_name)
+            external_logger.setLevel(logging.DEBUG)
+            external_logger.propagate = False
+            external_logger.handlers.clear()
+            external_logger.addHandler(technical_handler)
+            external_logger.addHandler(console_handler)
