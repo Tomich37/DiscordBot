@@ -194,6 +194,14 @@ class Bot(commands.Bot):
         async with self.user_message_counters_lock:
             return self.user_message_counters.get((guild_id, user_id), 0)
 
+    async def get_pending_guild_message_counts(self, guild_id: int) -> dict[int, int]:
+        async with self.user_message_counters_lock:
+            return {
+                user_id: count
+                for (counter_guild_id, user_id), count in self.user_message_counters.items()
+                if counter_guild_id == guild_id
+            }
+
     async def flush_user_message_stats(self):
         async with self.user_message_counters_lock:
             counters = dict(self.user_message_counters)

@@ -121,6 +121,22 @@ class Database:
                 "last_message_at": stats.last_message_at,
             }
 
+    def get_guild_user_stats(self, guild_id: int) -> list[dict]:
+        with Session(autoflush=False, bind=engine) as db:
+            stats_rows = db.query(GuildUserStats).filter_by(guild_id=guild_id).all()
+            return [
+                {
+                    "user_id": stats.user_id,
+                    "message_count": stats.message_count,
+                    "total_voice_seconds": stats.total_voice_seconds,
+                    "stats_started_at": stats.stats_started_at,
+                    "current_voice_channel_id": stats.current_voice_channel_id,
+                    "voice_joined_at": stats.voice_joined_at,
+                    "last_message_at": stats.last_message_at,
+                }
+                for stats in stats_rows
+            ]
+
     def create_update_contest(self, guild_id: int, channel_id: int, emoji_str: str, status: bool):
         with Session(autoflush=False, bind=engine) as db:
             # Старую таблицу сохраняем для обратной совместимости.
