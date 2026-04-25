@@ -7,6 +7,7 @@ import time
 from dataclasses import dataclass
 from functools import partial
 from typing import Optional
+from urllib.parse import parse_qs, urlparse
 
 import disnake
 import imageio_ffmpeg
@@ -18,7 +19,8 @@ from disnake.ext import commands
 YTDL_OPTIONS = {
     "format": "bestaudio/best",
     "default_search": "ytsearch",
-    "noplaylist": True,
+    "noplaylist": False,
+    "ignoreerrors": True,
     "quiet": True,
     "no_warnings": True,
     "source_address": "0.0.0.0",
@@ -29,7 +31,7 @@ FFMPEG_BEFORE_OPTIONS = (
 )
 FFMPEG_OPTIONS = "-vn"
 VOICE_CONNECT_TIMEOUT_SECONDS = 20
-MAX_QUEUE_SIZE = 25
+MAX_QUEUE_SIZE = 200
 
 
 def _get_ffmpeg_executable() -> str:
@@ -103,45 +105,113 @@ class MusicCommands(commands.Cog):
             return f"{hours}:{minutes:02d}:{seconds:02d}"
         return f"{minutes}:{seconds:02d}"
 
-    async def _extract_track(self, query: str, requested_by: str) -> Track:
-        loop = asyncio.get_running_loop()
-        extract = partial(self.ytdl.extract_info, query, download=False)
-        started_at = time.monotonic()
-        self.logger.debug("Музыка: начинаю поиск/извлечение трека | query=%s", self._short_query(query))
-        data = await loop.run_in_executor(None, extract)
-        self.logger.debug(
-            "Музыка: yt-dlp вернул данные за %.2f сек | type=%s | has_entries=%s",
-            time.monotonic() - started_at,
-            data.get("_type"),
-            "entries" in data,
+    @staticmethod
+    def _has_playlist_marker(query: str) -> bool:
+        parsed_url = urlparse(query)
+        query_params = parse_qs(parsed_url.query)
+        return bool(query_params.get("list")) or "/playlist" in parsed_url.path
+
+    @staticmethod
+    def _is_playlist_result(query: str, data: dict) -> bool:
+        if not data or "entries" not in data:
+            return False
+
+        extractor = str(data.get("extractor") or "").lower()
+        extractor_key = str(data.get("extractor_key") or "").lower()
+        if "search" in extractor or "search" in extractor_key:
+            return False
+
+        return (
+            MusicCommands._has_playlist_marker(query)
+            or data.get("_type") in {"playlist", "multi_video"}
+            or "playlist" in extractor
+            or "playlist" in extractor_key
+            or extractor_key == "youtubetab"
         )
 
-        if "entries" in data:
-            entries = [entry for entry in data["entries"] if entry]
-            self.logger.debug("Музыка: найдено вариантов поиска: %s", len(entries))
-            if not entries:
-                raise ValueError("По запросу ничего не найдено.")
-            data = entries[0]
-
+    @staticmethod
+    def _build_track(data: dict, query: str, requested_by: str) -> Track:
         stream_url = data.get("url")
         if not stream_url:
             raise ValueError("Не получилось получить аудиопоток.")
 
-        track = Track(
+        return Track(
             title=data.get("title") or "Без названия",
             webpage_url=data.get("webpage_url") or data.get("original_url") or query,
             stream_url=stream_url,
             duration=data.get("duration"),
             requested_by=requested_by,
         )
+
+    def _extract_tracks_sync(self, query: str, requested_by: str) -> list[Track]:
+        data = self.ytdl.extract_info(query, download=False)
         self.logger.debug(
-            "Музыка: трек подготовлен | title=%s | duration=%s | page=%s | stream_host=%s",
-            track.title,
-            track.duration,
-            track.webpage_url,
-            stream_url.split("/")[2] if "://" in stream_url else "unknown",
+            "Музыка: yt-dlp вернул данные | type=%s | extractor=%s | extractor_key=%s | has_entries=%s",
+            data.get("_type") if data else None,
+            data.get("extractor") if data else None,
+            data.get("extractor_key") if data else None,
+            bool(data and "entries" in data),
         )
-        return track
+
+        if not data:
+            raise ValueError("По запросу ничего не найдено.")
+
+        if "entries" not in data:
+            return [self._build_track(data, query, requested_by)]
+
+        entries = [entry for entry in data["entries"] if entry]
+        self.logger.debug(
+            "Музыка: найдено элементов в ответе yt-dlp | count=%s | playlist=%s",
+            len(entries),
+            self._is_playlist_result(query, data),
+        )
+        if not entries:
+            raise ValueError("По запросу ничего не найдено.")
+
+        if not self._is_playlist_result(query, data):
+            return [self._build_track(entries[0], query, requested_by)]
+
+        tracks = []
+        for index, entry in enumerate(entries, start=1):
+            try:
+                tracks.append(self._build_track(entry, query, requested_by))
+            except ValueError:
+                entry_url = entry.get("webpage_url") or entry.get("url")
+                if not entry_url:
+                    self.logger.debug(
+                        "Музыка: пропущен элемент плейлиста без ссылки | index=%s title=%s",
+                        index,
+                        entry.get("title"),
+                    )
+                    continue
+
+                try:
+                    full_entry = self.ytdl.extract_info(entry_url, download=False)
+                    tracks.append(self._build_track(full_entry, query, requested_by))
+                except Exception as e:
+                    self.logger.warning(
+                        "Музыка: не удалось подготовить элемент плейлиста | index=%s url=%s error=%s",
+                        index,
+                        entry_url,
+                        e,
+                    )
+
+        if not tracks:
+            raise ValueError("Не получилось получить аудиопотоки из плейлиста.")
+        return tracks
+
+    async def _extract_tracks(self, query: str, requested_by: str) -> list[Track]:
+        loop = asyncio.get_running_loop()
+        extract = partial(self._extract_tracks_sync, query, requested_by)
+        started_at = time.monotonic()
+        self.logger.debug("Музыка: начинаю поиск/извлечение треков | query=%s", self._short_query(query))
+        data = await loop.run_in_executor(None, extract)
+        self.logger.debug(
+            "Музыка: подготовлены треки за %.2f сек | count=%s",
+            time.monotonic() - started_at,
+            len(data),
+        )
+        return data
 
     async def _ensure_voice_client(
         self,
@@ -370,30 +440,49 @@ class MusicCommands(commands.Cog):
                 voice_client.is_paused(),
             )
 
-            if state.queue.qsize() >= MAX_QUEUE_SIZE:
+            free_slots = MAX_QUEUE_SIZE - state.queue.qsize()
+            if free_slots <= 0:
                 await inter.edit_original_response(
                     f"Очередь переполнена. Максимум треков в очереди: {MAX_QUEUE_SIZE}."
                 )
                 return
 
-            track = await self._extract_track(query, inter.author.mention)
+            tracks = await self._extract_tracks(query, inter.author.mention)
+            skipped_tracks = max(len(tracks) - free_slots, 0)
+            tracks_to_add = tracks[:free_slots]
             async with state.lock:
-                await state.queue.put(track)
-                queue_position = state.queue.qsize()
+                for track in tracks_to_add:
+                    await state.queue.put(track)
+                first_position = state.queue.qsize() - len(tracks_to_add) + 1
                 self.logger.debug(
-                    "Музыка: трек добавлен в очередь | guild=%s position=%s title=%s",
+                    "Музыка: треки добавлены в очередь | guild=%s added=%s skipped=%s first_position=%s",
                     inter.guild.id,
-                    queue_position,
-                    track.title,
+                    len(tracks_to_add),
+                    skipped_tracks,
+                    first_position,
                 )
 
+            first_track = tracks_to_add[0]
             embed = disnake.Embed(
                 title="Добавлено в очередь",
-                description=f"[{track.title}]({track.webpage_url})",
+                description=(
+                    f"[{first_track.title}]({first_track.webpage_url})"
+                    if len(tracks_to_add) == 1
+                    else f"Добавлено треков: **{len(tracks_to_add)}**"
+                ),
                 color=0x00FF00,
             )
-            embed.add_field(name="Длительность", value=self._format_duration(track.duration))
-            embed.add_field(name="Позиция", value=str(queue_position))
+            if len(tracks_to_add) == 1:
+                embed.add_field(name="Длительность", value=self._format_duration(first_track.duration))
+            else:
+                embed.add_field(name="Первый трек", value=f"[{first_track.title}]({first_track.webpage_url})")
+            embed.add_field(name="Позиция", value=str(first_position))
+            if skipped_tracks:
+                embed.add_field(
+                    name="Не добавлено",
+                    value=f"{skipped_tracks} треков не поместились в очередь.",
+                    inline=False,
+                )
             await inter.edit_original_response(embed=embed)
 
             async with state.lock:
