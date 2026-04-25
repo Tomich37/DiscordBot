@@ -167,6 +167,26 @@ class SlashCommands(commands.Cog):
 
         return " ".join(parts)
 
+    @staticmethod
+    def _format_average_messages(value: float) -> str:
+        if value >= 10:
+            return f"{value:.0f}"
+        if value >= 1:
+            return f"{value:.1f}"
+        return f"{value:.2f}"
+
+    @staticmethod
+    def _get_observation_days(stats: dict) -> float:
+        stats_started_at = stats.get("stats_started_at")
+        if not stats_started_at:
+            return 1
+
+        if stats_started_at.tzinfo is not None:
+            stats_started_at = stats_started_at.replace(tzinfo=None)
+
+        elapsed_seconds = max((datetime.utcnow() - stats_started_at).total_seconds(), 1)
+        return max(elapsed_seconds / 86400, 1)
+
     async def _get_profile_stats(self, member: disnake.Member) -> dict:
         stats = self.db.get_user_stats(member.guild.id, member.id)
         total_voice_seconds = stats["total_voice_seconds"]
@@ -186,6 +206,9 @@ class SlashCommands(commands.Cog):
 
     @staticmethod
     def _format_profile_stats(stats: dict) -> str:
+        observation_days = SlashCommands._get_observation_days(stats)
+        messages_per_day = stats["message_count"] / observation_days
+        voice_seconds_per_day = stats["total_voice_seconds"] / observation_days
         voice_line = f"**В голосе:** `{SlashCommands._format_duration(stats['total_voice_seconds'])}`"
         if stats["current_voice_channel_id"]:
             voice_line = f"{voice_line}\n**Сейчас в канале:** <#{stats['current_voice_channel_id']}>"
@@ -196,8 +219,11 @@ class SlashCommands(commands.Cog):
 
         return (
             f"**Сообщений:** `{stats['message_count']}`\n"
+            f"**Сообщений в день:** `~{SlashCommands._format_average_messages(messages_per_day)}`\n"
             f"{voice_line}"
+            f"\n**Голоса в день:** `~{SlashCommands._format_duration(int(voice_seconds_per_day))}`"
             f"{last_message_line}"
+            f"\n**Статистика с:** {SlashCommands._format_timestamp(stats.get('stats_started_at'))}"
         )
 
     async def _build_profile_embed(self, member: disnake.Member) -> disnake.Embed:

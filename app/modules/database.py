@@ -24,7 +24,8 @@ class Database:
         if stats:
             return stats
 
-        stats = GuildUserStats(guild_id=guild_id, user_id=user_id)
+        now = datetime.utcnow()
+        stats = GuildUserStats(guild_id=guild_id, user_id=user_id, stats_started_at=now, updated_at=now)
         db.add(stats)
         db.flush()
         return stats
@@ -105,6 +106,7 @@ class Database:
                 return {
                     "message_count": 0,
                     "total_voice_seconds": 0,
+                    "stats_started_at": None,
                     "current_voice_channel_id": None,
                     "voice_joined_at": None,
                     "last_message_at": None,
@@ -113,6 +115,7 @@ class Database:
             return {
                 "message_count": stats.message_count,
                 "total_voice_seconds": stats.total_voice_seconds,
+                "stats_started_at": stats.stats_started_at,
                 "current_voice_channel_id": stats.current_voice_channel_id,
                 "voice_joined_at": stats.voice_joined_at,
                 "last_message_at": stats.last_message_at,

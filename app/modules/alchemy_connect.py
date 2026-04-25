@@ -132,6 +132,7 @@ class GuildUserStats(Base):
     user_id = Column(BigInteger, nullable=False, index=True)
     message_count = Column(Integer, default=0, nullable=False)
     total_voice_seconds = Column(Integer, default=0, nullable=False)
+    stats_started_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     current_voice_channel_id = Column(BigInteger, nullable=True)
     voice_joined_at = Column(DateTime, nullable=True)
     last_message_at = Column(DateTime, nullable=True)
@@ -208,6 +209,17 @@ def ensure_schema_updates():
                 )
             if "left_at" not in columns:
                 connection.execute(text("ALTER TABLE giveaway_participants ADD COLUMN left_at TIMESTAMP"))
+
+    if "guild_user_stats" in inspector.get_table_names():
+        columns = {column["name"] for column in inspector.get_columns("guild_user_stats")}
+        with engine.begin() as connection:
+            if "stats_started_at" not in columns:
+                connection.execute(
+                    text(
+                        "ALTER TABLE guild_user_stats "
+                        "ADD COLUMN stats_started_at TIMESTAMP NOT NULL DEFAULT NOW()"
+                    )
+                )
 
 
 # Создаём таблицы и добавляем недостающие колонки для уже существующей БД.
