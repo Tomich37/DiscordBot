@@ -20,6 +20,12 @@ class Messages:
             guild_id = self.message.guild.id
             channel_id = self.message.channel.id
 
+            # Общая пользовательская статистика собирается по всему серверу.
+            await self.bot.queue_user_message_stat(
+                guild_id=guild_id,
+                user_id=self.message.author.id,
+            )
+
             # Для каждого активного конкурса канала сохраняем принадлежность поста.
             active_contests = self.db.get_active_contests_for_channel(guild_id, channel_id)
             for contest in active_contests:
