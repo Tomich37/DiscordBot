@@ -19,7 +19,14 @@ from disnake.ext import commands
 YTDL_OPTIONS = {
     "format": "bestaudio/best",
     "default_search": "ytsearch",
-    "noplaylist": False,
+    "noplaylist": True,
+    "ignoreerrors": True,
+    "quiet": True,
+    "no_warnings": True,
+    "source_address": "0.0.0.0",
+}
+YTDL_PLAYLIST_OPTIONS = {
+    "extract_flat": "in_playlist",
     "ignoreerrors": True,
     "quiet": True,
     "no_warnings": True,
@@ -48,6 +55,9 @@ def _get_ffmpeg_executable() -> str:
 
 @dataclass
 class Track:
+    db_track_id: int
+    owner_id: int
+    position: int
     title: str
     webpage_url: str
     stream_url: str
@@ -57,8 +67,9 @@ class Track:
 
 class GuildMusicState:
     def __init__(self) -> None:
-        self.queue: asyncio.Queue[Track] = asyncio.Queue()
         self.current: Optional[Track] = None
+        self.owner_id: Optional[int] = None
+        self.stop_reason: Optional[str] = None
         self.lock = asyncio.Lock()
 
 
@@ -67,8 +78,10 @@ class MusicCommands(commands.Cog):
         self.bot = bot
         self.logger = logger
         self.ytdl = yt_dlp.YoutubeDL(YTDL_OPTIONS)
+        self.playlist_ytdl = yt_dlp.YoutubeDL(YTDL_PLAYLIST_OPTIONS)
         self.ffmpeg_executable = _get_ffmpeg_executable()
         self.guild_states: dict[int, GuildMusicState] = {}
+        self.bot.db.reset_music_playing_tracks()
         self.logger.debug(
             "Музыкальный cog загружен | ffmpeg: %s | DAVE: %s | yt-dlp options: %s",
             self.ffmpeg_executable,
@@ -130,21 +143,50 @@ class MusicCommands(commands.Cog):
         )
 
     @staticmethod
-    def _build_track(data: dict, query: str, requested_by: str) -> Track:
+    def _entry_webpage_url(entry: dict, query: str) -> str:
+        webpage_url = entry.get("webpage_url") or entry.get("original_url")
+        if webpage_url:
+            return webpage_url
+
+        entry_url = entry.get("url")
+        if not entry_url:
+            return query
+
+        if str(entry_url).startswith("http"):
+            return entry_url
+
+        extractor_key = str(entry.get("extractor_key") or "").lower()
+        if "youtube" in extractor_key and len(str(entry_url)) == 11:
+            return f"https://www.youtube.com/watch?v={entry_url}"
+
+        return str(entry_url)
+
+    def _build_music_item(self, entry: dict, query: str) -> dict:
+        return {
+            "title": entry.get("title") or "Без названия",
+            "webpage_url": self._entry_webpage_url(entry, query),
+            "duration": entry.get("duration"),
+        }
+
+    def _build_track(self, db_track: dict, data: dict, requested_by: str) -> Track:
         stream_url = data.get("url")
         if not stream_url:
             raise ValueError("Не получилось получить аудиопоток.")
 
         return Track(
+            db_track_id=db_track["id"],
+            owner_id=db_track["user_id"],
+            position=db_track["position"],
             title=data.get("title") or "Без названия",
-            webpage_url=data.get("webpage_url") or data.get("original_url") or query,
+            webpage_url=data.get("webpage_url") or data.get("original_url") or db_track["webpage_url"],
             stream_url=stream_url,
-            duration=data.get("duration"),
+            duration=data.get("duration") or db_track.get("duration"),
             requested_by=requested_by,
         )
 
-    def _extract_tracks_sync(self, query: str, requested_by: str) -> list[Track]:
-        data = self.ytdl.extract_info(query, download=False)
+    def _extract_music_items_sync(self, query: str) -> list[dict]:
+        ytdl = self.playlist_ytdl if self._has_playlist_marker(query) else self.ytdl
+        data = ytdl.extract_info(query, download=False)
         self.logger.debug(
             "Музыка: yt-dlp вернул данные | type=%s | extractor=%s | extractor_key=%s | has_entries=%s",
             data.get("_type") if data else None,
@@ -157,7 +199,7 @@ class MusicCommands(commands.Cog):
             raise ValueError("По запросу ничего не найдено.")
 
         if "entries" not in data:
-            return [self._build_track(data, query, requested_by)]
+            return [self._build_music_item(data, query)]
 
         entries = [entry for entry in data["entries"] if entry]
         self.logger.debug(
@@ -169,49 +211,49 @@ class MusicCommands(commands.Cog):
             raise ValueError("По запросу ничего не найдено.")
 
         if not self._is_playlist_result(query, data):
-            return [self._build_track(entries[0], query, requested_by)]
+            return [self._build_music_item(entries[0], query)]
 
-        tracks = []
-        for index, entry in enumerate(entries, start=1):
-            try:
-                tracks.append(self._build_track(entry, query, requested_by))
-            except ValueError:
-                entry_url = entry.get("webpage_url") or entry.get("url")
-                if not entry_url:
-                    self.logger.debug(
-                        "Музыка: пропущен элемент плейлиста без ссылки | index=%s title=%s",
-                        index,
-                        entry.get("title"),
-                    )
-                    continue
+        return [self._build_music_item(entry, query) for entry in entries]
 
-                try:
-                    full_entry = self.ytdl.extract_info(entry_url, download=False)
-                    tracks.append(self._build_track(full_entry, query, requested_by))
-                except Exception as e:
-                    self.logger.warning(
-                        "Музыка: не удалось подготовить элемент плейлиста | index=%s url=%s error=%s",
-                        index,
-                        entry_url,
-                        e,
-                    )
-
-        if not tracks:
-            raise ValueError("Не получилось получить аудиопотоки из плейлиста.")
-        return tracks
-
-    async def _extract_tracks(self, query: str, requested_by: str) -> list[Track]:
+    async def _extract_music_items(self, query: str) -> list[dict]:
         loop = asyncio.get_running_loop()
-        extract = partial(self._extract_tracks_sync, query, requested_by)
+        extract = partial(self._extract_music_items_sync, query)
         started_at = time.monotonic()
-        self.logger.debug("Музыка: начинаю поиск/извлечение треков | query=%s", self._short_query(query))
+        self.logger.debug("Музыка: начинаю чтение треков | query=%s", self._short_query(query))
         data = await loop.run_in_executor(None, extract)
         self.logger.debug(
-            "Музыка: подготовлены треки за %.2f сек | count=%s",
+            "Музыка: получены элементы плейлиста за %.2f сек | count=%s",
             time.monotonic() - started_at,
             len(data),
         )
         return data
+
+    async def _prepare_track(self, db_track: dict, requested_by: str) -> Track:
+        loop = asyncio.get_running_loop()
+        started_at = time.monotonic()
+        self.logger.debug(
+            "Музыка: готовлю трек к проигрыванию | db_track=%s position=%s url=%s",
+            db_track["id"],
+            db_track["position"],
+            db_track["webpage_url"],
+        )
+        extract = partial(self.ytdl.extract_info, db_track["webpage_url"], download=False)
+        data = await loop.run_in_executor(None, extract)
+        if "entries" in data:
+            entries = [entry for entry in data["entries"] if entry]
+            if not entries:
+                raise ValueError("По запросу ничего не найдено.")
+            data = entries[0]
+
+        track = self._build_track(db_track, data, requested_by)
+        self.logger.debug(
+            "Музыка: трек готов за %.2f сек | db_track=%s title=%s stream_host=%s",
+            time.monotonic() - started_at,
+            db_track["id"],
+            track.title,
+            track.stream_url.split("/")[2] if "://" in track.stream_url else "unknown",
+        )
+        return track
 
     async def _ensure_voice_client(
         self,
@@ -341,19 +383,46 @@ class MusicCommands(commands.Cog):
             state.current = None
             return
 
-        if state.queue.empty():
-            self.logger.debug("Музыка: очередь пуста | guild=%s", guild.id)
+        if state.owner_id is None:
+            self.logger.debug("Музыка: владелец плейлиста не выбран | guild=%s", guild.id)
             state.current = None
             return
 
-        track = await state.queue.get()
+        requested_by = f"<@{state.owner_id}>"
+        track = None
+        while track is None:
+            db_track = self.bot.db.get_next_music_track(guild.id, state.owner_id)
+            if not db_track:
+                self.logger.debug(
+                    "Музыка: в БД нет следующих треков | guild=%s owner=%s",
+                    guild.id,
+                    state.owner_id,
+                )
+                state.current = None
+                return
+
+            try:
+                self.bot.db.mark_music_track_status(db_track["id"], "playing")
+                track = await self._prepare_track(db_track, requested_by)
+            except Exception as e:
+                self.bot.db.mark_music_track_status(db_track["id"], "error", str(e)[:1000])
+                self.logger.warning(
+                    "Музыка: трек из плейлиста недоступен и будет пропущен | guild=%s owner=%s db_track=%s error=%s",
+                    guild.id,
+                    state.owner_id,
+                    db_track["id"],
+                    e,
+                )
+
         state.current = track
         self.logger.debug(
-            "Музыка: запускаю трек | guild=%s channel=%s title=%s queue_left=%s",
+            "Музыка: запускаю трек | guild=%s channel=%s owner=%s db_track=%s position=%s title=%s",
             guild.id,
             getattr(voice_client.channel, "id", None),
+            track.owner_id,
+            track.db_track_id,
+            track.position,
             track.title,
-            state.queue.qsize(),
         )
 
         source = disnake.FFmpegOpusAudio(
@@ -364,19 +433,40 @@ class MusicCommands(commands.Cog):
         )
 
         def after_play(error: Optional[Exception]) -> None:
+            stop_reason = state.stop_reason
+            state.stop_reason = None
             if error:
+                status = "error"
+                error_message = str(error)[:1000]
+                if stop_reason == "leave":
+                    status = "pending"
+                    error_message = None
+                elif stop_reason in {"skip", "stop"}:
+                    status = "skipped"
+                    error_message = None
+                self.bot.db.mark_music_track_status(track.db_track_id, status, error_message)
                 self.logger.error(
-                    "Музыка: ffmpeg/voice завершился с ошибкой | guild=%s title=%s error=%s",
+                    "Музыка: ffmpeg/voice завершился с ошибкой | guild=%s title=%s status=%s error=%s",
                     guild.id,
                     track.title,
+                    status,
                     error,
                 )
             else:
+                status = "skipped" if stop_reason in {"skip", "stop"} else "played"
+                if stop_reason == "leave":
+                    status = "pending"
+                self.bot.db.mark_music_track_status(track.db_track_id, status)
                 self.logger.debug(
-                    "Музыка: трек завершён без ошибки | guild=%s title=%s",
+                    "Музыка: трек завершён | guild=%s title=%s status=%s",
                     guild.id,
                     track.title,
+                    status,
                 )
+
+            if stop_reason in {"stop", "leave"}:
+                state.current = None
+                return
 
             future = asyncio.run_coroutine_threadsafe(
                 self._play_next(guild, text_channel),
@@ -414,7 +504,10 @@ class MusicCommands(commands.Cog):
     async def play(
         self,
         inter: disnake.ApplicationCommandInteraction,
-        query: str = commands.Param(description="Ссылка на YouTube или поисковый запрос"),
+        query: Optional[str] = commands.Param(
+            default=None,
+            description="Ссылка на YouTube, плейлист или поиск. Если пусто, продолжит ваш плейлист.",
+        ),
     ) -> None:
         if inter.guild is None:
             await inter.response.send_message("Музыка работает только на сервере.", ephemeral=True)
@@ -425,74 +518,105 @@ class MusicCommands(commands.Cog):
             inter.author.id,
             inter.guild.id,
             inter.channel.id if inter.channel else None,
-            self._short_query(query),
+            self._short_query(query or ""),
         )
         await inter.response.defer()
 
         try:
             voice_client = await self._ensure_voice_client(inter)
             state = self._get_state(inter.guild.id)
+            playlist_stats = self.bot.db.get_music_playlist_stats(inter.guild.id, inter.author.id)
             self.logger.debug(
-                "Музыка: состояние перед добавлением | guild=%s queue=%s playing=%s paused=%s",
+                "Музыка: состояние перед добавлением | guild=%s owner=%s pending=%s playing=%s paused=%s",
                 inter.guild.id,
-                state.queue.qsize(),
+                inter.author.id,
+                playlist_stats["pending_count"],
                 voice_client.is_playing(),
                 voice_client.is_paused(),
             )
 
-            free_slots = MAX_QUEUE_SIZE - state.queue.qsize()
-            if free_slots <= 0:
-                await inter.edit_original_response(
-                    f"Очередь переполнена. Максимум треков в очереди: {MAX_QUEUE_SIZE}."
-                )
-                return
+            if query:
+                free_slots = MAX_QUEUE_SIZE - playlist_stats["pending_count"]
+                if free_slots <= 0:
+                    await inter.edit_original_response(
+                        f"Очередь переполнена. Максимум треков в очереди: {MAX_QUEUE_SIZE}."
+                    )
+                    return
 
-            tracks = await self._extract_tracks(query, inter.author.mention)
-            skipped_tracks = max(len(tracks) - free_slots, 0)
-            tracks_to_add = tracks[:free_slots]
-            async with state.lock:
-                for track in tracks_to_add:
-                    await state.queue.put(track)
-                first_position = state.queue.qsize() - len(tracks_to_add) + 1
-                self.logger.debug(
-                    "Музыка: треки добавлены в очередь | guild=%s added=%s skipped=%s first_position=%s",
+                music_items = await self._extract_music_items(query)
+                skipped_tracks = max(len(music_items) - free_slots, 0)
+                items_to_add = music_items[:free_slots]
+                append_result = self.bot.db.append_music_tracks(
                     inter.guild.id,
-                    len(tracks_to_add),
+                    inter.author.id,
+                    items_to_add,
+                )
+                first_position = append_result.get("first_position", 1)
+                self.logger.debug(
+                    "Музыка: треки сохранены в БД | guild=%s owner=%s added=%s skipped=%s first_position=%s",
+                    inter.guild.id,
+                    inter.author.id,
+                    len(items_to_add),
                     skipped_tracks,
                     first_position,
                 )
 
-            first_track = tracks_to_add[0]
-            embed = disnake.Embed(
-                title="Добавлено в очередь",
-                description=(
-                    f"[{first_track.title}]({first_track.webpage_url})"
-                    if len(tracks_to_add) == 1
-                    else f"Добавлено треков: **{len(tracks_to_add)}**"
-                ),
-                color=0x00FF00,
-            )
-            if len(tracks_to_add) == 1:
-                embed.add_field(name="Длительность", value=self._format_duration(first_track.duration))
-            else:
-                embed.add_field(name="Первый трек", value=f"[{first_track.title}]({first_track.webpage_url})")
-            embed.add_field(name="Позиция", value=str(first_position))
-            if skipped_tracks:
-                embed.add_field(
-                    name="Не добавлено",
-                    value=f"{skipped_tracks} треков не поместились в очередь.",
-                    inline=False,
+                first_track = items_to_add[0]
+                embed = disnake.Embed(
+                    title="Добавлено в личный плейлист",
+                    description=(
+                        f"[{first_track['title']}]({first_track['webpage_url']})"
+                        if len(items_to_add) == 1
+                        else f"Добавлено треков: **{len(items_to_add)}**"
+                    ),
+                    color=0x00FF00,
                 )
-            await inter.edit_original_response(embed=embed)
+                if len(items_to_add) == 1:
+                    embed.add_field(name="Длительность", value=self._format_duration(first_track.get("duration")))
+                else:
+                    embed.add_field(
+                        name="Первый трек",
+                        value=f"[{first_track['title']}]({first_track['webpage_url']})",
+                    )
+                embed.add_field(name="Позиция", value=str(first_position))
+                if skipped_tracks:
+                    embed.add_field(
+                        name="Не добавлено",
+                        value=f"{skipped_tracks} треков не поместились в очередь.",
+                        inline=False,
+                    )
+                await inter.edit_original_response(embed=embed)
+            else:
+                if playlist_stats["pending_count"] <= 0:
+                    await inter.edit_original_response("В вашем личном плейлисте нет треков для продолжения.")
+                    return
+
+                await inter.edit_original_response(
+                    f"Продолжаю ваш личный плейлист. Осталось треков: `{playlist_stats['pending_count']}`."
+                )
 
             async with state.lock:
                 if not voice_client.is_playing() and not voice_client.is_paused():
-                    self.logger.debug("Музыка: плеер свободен, запускаю очередь | guild=%s", inter.guild.id)
+                    state.owner_id = inter.author.id
+                    self.logger.debug(
+                        "Музыка: плеер свободен, запускаю личный плейлист | guild=%s owner=%s",
+                        inter.guild.id,
+                        state.owner_id,
+                    )
                     await self._play_next(inter.guild, inter.channel)
+                elif state.owner_id == inter.author.id:
+                    self.logger.debug(
+                        "Музыка: плеер уже проигрывает плейлист этого пользователя | guild=%s owner=%s",
+                        inter.guild.id,
+                        state.owner_id,
+                    )
                 else:
                     self.logger.debug(
-                        "Музыка: плеер уже занят, трек оставлен в очереди | guild=%s playing=%s paused=%s",
+                        "Музыка: плеер занят другим плейлистом, треки сохранены для будущего запуска | "
+                        "guild=%s current_owner=%s requester=%s playing=%s paused=%s",
                         inter.guild.id,
+                        state.owner_id,
+                        inter.author.id,
                         voice_client.is_playing(),
                         voice_client.is_paused(),
                     )
@@ -519,6 +643,8 @@ class MusicCommands(commands.Cog):
             return
 
         self.logger.info("Музыка: /skip | user=%s guild=%s", inter.author.id, inter.guild.id)
+        state = self._get_state(inter.guild.id)
+        state.stop_reason = "skip"
         voice_client.stop()
         await inter.response.send_message("Трек пропущен.")
 
@@ -529,22 +655,23 @@ class MusicCommands(commands.Cog):
             return
 
         state = self._get_state(inter.guild.id)
-        removed_tracks = state.queue.qsize()
-        while not state.queue.empty():
-            state.queue.get_nowait()
+        target_user_id = state.owner_id or inter.author.id
+        removed_tracks = self.bot.db.clear_music_playlist(inter.guild.id, target_user_id)
         state.current = None
 
         voice_client = inter.guild.voice_client
         if voice_client and (voice_client.is_playing() or voice_client.is_paused()):
+            state.stop_reason = "stop"
             voice_client.stop()
 
         self.logger.info(
-            "Музыка: /stop | user=%s guild=%s removed_tracks=%s",
+            "Музыка: /stop | user=%s guild=%s target_user=%s removed_tracks=%s",
             inter.author.id,
             inter.guild.id,
+            target_user_id,
             removed_tracks,
         )
-        await inter.response.send_message("Музыка остановлена, очередь очищена.")
+        await inter.response.send_message("Музыка остановлена, личный плейлист очищен.")
 
     @commands.slash_command(name="pause", description="Поставить музыку на паузу")
     async def pause(self, inter: disnake.ApplicationCommandInteraction) -> None:
@@ -575,27 +702,23 @@ class MusicCommands(commands.Cog):
             return
 
         state = self._get_state(inter.guild.id)
+        playlist_stats = self.bot.db.get_music_playlist_stats(inter.guild.id, inter.author.id)
         self.logger.debug(
-            "Музыка: /queue | user=%s guild=%s current=%s queue=%s",
+            "Музыка: /queue | user=%s guild=%s current=%s pending=%s",
             inter.author.id,
             inter.guild.id,
             state.current.title if state.current else None,
-            state.queue.qsize(),
+            playlist_stats["pending_count"],
         )
         lines = []
 
         if state.current:
             lines.append(f"**Сейчас:** [{state.current.title}]({state.current.webpage_url})")
 
-        queued_tracks = list(state.queue._queue)
-        if queued_tracks:
-            lines.extend(
-                f"`{index}.` [{track.title}]({track.webpage_url}) "
-                f"`{self._format_duration(track.duration)}`"
-                for index, track in enumerate(queued_tracks[:10], start=1)
-            )
-            if len(queued_tracks) > 10:
-                lines.append(f"И ещё треков: {len(queued_tracks) - 10}")
+        if playlist_stats["pending_count"]:
+            lines.append(f"**В вашем личном плейлисте осталось:** `{playlist_stats['pending_count']}`")
+            if playlist_stats["error_count"]:
+                lines.append(f"**Недоступных треков пропущено:** `{playlist_stats['error_count']}`")
 
         if not lines:
             await inter.response.send_message("Очередь пустая.", ephemeral=True)
@@ -621,6 +744,8 @@ class MusicCommands(commands.Cog):
             inter.guild.id,
             getattr(voice_client.channel, "id", None),
         )
+        state = self._get_state(inter.guild.id)
+        state.stop_reason = "leave"
         await voice_client.disconnect(force=True)
         if inter.guild:
             self.guild_states.pop(inter.guild.id, None)

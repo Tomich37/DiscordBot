@@ -7,6 +7,8 @@ from app.modules.alchemy_connect import (
     GiveawayWin,
     GuildUserStats,
     MessageStatistics,
+    MusicPlaylist,
+    MusicPlaylistTrack,
     RecruitmentPosition,
     RecruitmentQuestion,
     Recruitments,
@@ -19,6 +21,8 @@ from datetime import datetime
 
 
 class Database:
+    MUSIC_PENDING_STATUSES = ("pending",)
+
     def _get_or_create_user_stats(self, db, guild_id: int, user_id: int):
         stats = db.query(GuildUserStats).filter_by(guild_id=guild_id, user_id=user_id).first()
         if stats:
@@ -136,6 +140,173 @@ class Database:
                 }
                 for stats in stats_rows
             ]
+
+    def get_or_create_music_playlist(self, guild_id: int, user_id: int) -> int:
+        with Session(autoflush=False, bind=engine) as db:
+            playlist = (
+                db.query(MusicPlaylist)
+                .filter_by(guild_id=guild_id, user_id=user_id, is_active=True)
+                .first()
+            )
+            if playlist:
+                return playlist.id
+
+            playlist = MusicPlaylist(guild_id=guild_id, user_id=user_id)
+            db.add(playlist)
+            db.commit()
+            db.refresh(playlist)
+            return playlist.id
+
+    def append_music_tracks(self, guild_id: int, user_id: int, tracks: list[dict]) -> dict:
+        if not tracks:
+            return {"playlist_id": self.get_or_create_music_playlist(guild_id, user_id), "added_count": 0}
+
+        with Session(autoflush=False, bind=engine) as db:
+            now = datetime.utcnow()
+            playlist = (
+                db.query(MusicPlaylist)
+                .filter_by(guild_id=guild_id, user_id=user_id, is_active=True)
+                .first()
+            )
+            if not playlist:
+                playlist = MusicPlaylist(guild_id=guild_id, user_id=user_id, created_at=now, updated_at=now)
+                db.add(playlist)
+                db.flush()
+
+            last_position = (
+                db.query(MusicPlaylistTrack.position)
+                .filter_by(playlist_id=playlist.id)
+                .order_by(MusicPlaylistTrack.position.desc())
+                .first()
+            )
+            next_position = (last_position[0] + 1) if last_position else 1
+
+            for offset, track in enumerate(tracks):
+                db.add(
+                    MusicPlaylistTrack(
+                        playlist_id=playlist.id,
+                        position=next_position + offset,
+                        title=track["title"],
+                        webpage_url=track["webpage_url"],
+                        duration=track.get("duration"),
+                        status="pending",
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+
+            playlist.updated_at = now
+            db.commit()
+            return {
+                "playlist_id": playlist.id,
+                "added_count": len(tracks),
+                "first_position": next_position,
+            }
+
+    def get_next_music_track(self, guild_id: int, user_id: int) -> dict | None:
+        with Session(autoflush=False, bind=engine) as db:
+            playlist = (
+                db.query(MusicPlaylist)
+                .filter_by(guild_id=guild_id, user_id=user_id, is_active=True)
+                .first()
+            )
+            if not playlist:
+                return None
+
+            track = (
+                db.query(MusicPlaylistTrack)
+                .filter(
+                    MusicPlaylistTrack.playlist_id == playlist.id,
+                    MusicPlaylistTrack.status.in_(self.MUSIC_PENDING_STATUSES),
+                )
+                .order_by(MusicPlaylistTrack.position.asc())
+                .first()
+            )
+            if not track:
+                return None
+
+            return {
+                "id": track.id,
+                "playlist_id": playlist.id,
+                "user_id": playlist.user_id,
+                "position": track.position,
+                "title": track.title,
+                "webpage_url": track.webpage_url,
+                "duration": track.duration,
+                "status": track.status,
+            }
+
+    def mark_music_track_status(self, track_id: int, status: str, error_message: str | None = None):
+        with Session(autoflush=False, bind=engine) as db:
+            track = db.query(MusicPlaylistTrack).filter_by(id=track_id).first()
+            if not track:
+                return
+
+            now = datetime.utcnow()
+            track.status = status
+            track.error_message = error_message
+            track.updated_at = now
+            if status == "pending":
+                track.started_at = None
+                track.finished_at = None
+            if status == "playing":
+                track.started_at = now
+            if status in {"played", "skipped", "error"}:
+                track.finished_at = now
+
+            playlist = db.query(MusicPlaylist).filter_by(id=track.playlist_id).first()
+            if playlist:
+                playlist.updated_at = now
+
+            db.commit()
+
+    def reset_music_playing_tracks(self):
+        with Session(autoflush=False, bind=engine) as db:
+            now = datetime.utcnow()
+            tracks = db.query(MusicPlaylistTrack).filter_by(status="playing").all()
+            for track in tracks:
+                track.status = "pending"
+                track.started_at = None
+                track.updated_at = now
+
+            db.commit()
+
+    def clear_music_playlist(self, guild_id: int, user_id: int):
+        with Session(autoflush=False, bind=engine) as db:
+            playlist = (
+                db.query(MusicPlaylist)
+                .filter_by(guild_id=guild_id, user_id=user_id, is_active=True)
+                .first()
+            )
+            if not playlist:
+                return 0
+
+            deleted_count = (
+                db.query(MusicPlaylistTrack)
+                .filter_by(playlist_id=playlist.id)
+                .delete(synchronize_session=False)
+            )
+            playlist.updated_at = datetime.utcnow()
+            db.commit()
+            return deleted_count
+
+    def get_music_playlist_stats(self, guild_id: int, user_id: int) -> dict:
+        with Session(autoflush=False, bind=engine) as db:
+            playlist = (
+                db.query(MusicPlaylist)
+                .filter_by(guild_id=guild_id, user_id=user_id, is_active=True)
+                .first()
+            )
+            if not playlist:
+                return {"pending_count": 0, "played_count": 0, "error_count": 0}
+
+            rows = db.query(MusicPlaylistTrack.status).filter_by(playlist_id=playlist.id).all()
+            statuses = [row[0] for row in rows]
+            return {
+                "pending_count": sum(status in self.MUSIC_PENDING_STATUSES for status in statuses),
+                "played_count": statuses.count("played"),
+                "error_count": statuses.count("error"),
+            }
 
     def create_update_contest(self, guild_id: int, channel_id: int, emoji_str: str, status: bool):
         with Session(autoflush=False, bind=engine) as db:
