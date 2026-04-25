@@ -358,6 +358,166 @@ class SlashCommands(commands.Cog):
             self.logger.exception(f"Ошибка в commands/banner: {e}")
             print(f"Ошибка в commands/banner: {e}")
 
+    @staticmethod
+    def _format_guild_owner(guild: disnake.Guild) -> str:
+        owner = guild.owner
+        if owner:
+            return f"{owner.mention}\n`{owner}`"
+
+        return f"`ID: {guild.owner_id}`"
+
+    @staticmethod
+    def _format_guild_verification(guild: disnake.Guild) -> str:
+        verification_names = {
+            "none": "Нет",
+            "low": "Низкий",
+            "medium": "Средний",
+            "high": "Высокий",
+            "highest": "Максимальный",
+        }
+        verification_name = getattr(guild.verification_level, "name", str(guild.verification_level))
+        return verification_names.get(verification_name, verification_name)
+
+    @staticmethod
+    def _format_explicit_content_filter(guild: disnake.Guild) -> str:
+        filter_names = {
+            "disabled": "Отключён",
+            "no_role": "Для участников без ролей",
+            "all_members": "Для всех участников",
+        }
+        filter_name = getattr(guild.explicit_content_filter, "name", str(guild.explicit_content_filter))
+        return filter_names.get(filter_name, filter_name)
+
+    @staticmethod
+    def _format_guild_boost_level(guild: disnake.Guild) -> str:
+        premium_tier = getattr(guild, "premium_tier", 0)
+        boost_count = getattr(guild, "premium_subscription_count", 0) or 0
+
+        if premium_tier <= 0:
+            return f"Уровень 0\nБустов: `{boost_count}`"
+
+        return f"Уровень {premium_tier}\nБустов: `{boost_count}`"
+
+    @staticmethod
+    def _format_guild_features(guild: disnake.Guild) -> str:
+        feature_names = {
+            "COMMUNITY": "Сообщество",
+            "DISCOVERABLE": "В поиске Discord",
+            "INVITES_DISABLED": "Инвайты отключены",
+            "NEWS": "Каналы объявлений",
+            "PARTNERED": "Партнёр Discord",
+            "VERIFIED": "Верифицирован",
+            "WELCOME_SCREEN_ENABLED": "Экран приветствия",
+        }
+        features = [
+            feature_names.get(feature, feature.replace("_", " ").title())
+            for feature in getattr(guild, "features", [])
+        ]
+
+        if not features:
+            return "Особых функций нет"
+
+        return "\n".join(f"• {feature}" for feature in features[:8])
+
+    @staticmethod
+    def _count_humans_and_bots(guild: disnake.Guild) -> tuple[int, int]:
+        bot_count = sum(1 for member in guild.members if member.bot)
+        human_count = guild.member_count - bot_count if guild.member_count else 0
+        return human_count, bot_count
+
+    def _build_serverinfo_embed(self, guild: disnake.Guild) -> disnake.Embed:
+        human_count, bot_count = self._count_humans_and_bots(guild)
+        text_channels = len(guild.text_channels)
+        voice_channels = len(guild.voice_channels)
+        category_count = len(guild.categories)
+        role_count = max(len(guild.roles) - 1, 0)
+        emoji_count = len(guild.emojis)
+        sticker_count = len(getattr(guild, "stickers", []))
+        accent_color = 0x5865F2
+
+        if guild.icon:
+            accent_color = 0x2ECC71
+
+        embed = disnake.Embed(
+            title=f"Сервер: {guild.name}",
+            description=(
+                f"**ID:** `{guild.id}`\n"
+                f"**Создан:** {self._format_timestamp(guild.created_at)}"
+            ),
+            color=accent_color,
+        )
+        embed.set_author(name=BOT_NAME, url=BOT_URL, icon_url=BOT_ICON_URL)
+
+        if guild.icon:
+            embed.set_thumbnail(url=guild.icon.with_size(1024).url)
+        if guild.banner:
+            embed.set_image(url=guild.banner.with_size(4096).url)
+
+        embed.add_field(name="Владелец", value=self._format_guild_owner(guild), inline=True)
+        embed.add_field(
+            name="Участники",
+            value=(
+                f"Всего: `{guild.member_count}`\n"
+                f"Людей: `{human_count}`\n"
+                f"Ботов: `{bot_count}`"
+            ),
+            inline=True,
+        )
+        embed.add_field(
+            name="Бусты",
+            value=self._format_guild_boost_level(guild),
+            inline=True,
+        )
+        embed.add_field(
+            name="Каналы",
+            value=(
+                f"Текстовые: `{text_channels}`\n"
+                f"Голосовые: `{voice_channels}`\n"
+                f"Категории: `{category_count}`"
+            ),
+            inline=True,
+        )
+        embed.add_field(
+            name="Оформление",
+            value=(
+                f"Ролей: `{role_count}`\n"
+                f"Эмодзи: `{emoji_count}`\n"
+                f"Стикеров: `{sticker_count}`"
+            ),
+            inline=True,
+        )
+        embed.add_field(
+            name="Безопасность",
+            value=(
+                f"Верификация: **{self._format_guild_verification(guild)}**\n"
+                f"NSFW-фильтр: **{self._format_explicit_content_filter(guild)}**"
+            ),
+            inline=True,
+        )
+        embed.add_field(name="Функции сервера", value=self._format_guild_features(guild), inline=False)
+        embed.set_footer(text=FOOTER_TEXT)
+        return embed
+
+    @commands.slash_command(
+        name="serverinfo",
+        description="Показать красивый профиль сервера",
+        dm_permission=False,
+    )
+    async def serverinfo(self, inter: disnake.GuildCommandInteraction):
+        """
+        Профиль текущего сервера.
+        """
+        try:
+            embed = self._build_serverinfo_embed(inter.guild)
+            await inter.response.send_message(embed=embed)
+        except Exception as e:
+            await inter.response.send_message(
+                "Не получилось собрать профиль сервера.",
+                ephemeral=True,
+            )
+            self.logger.exception(f"Ошибка в commands/serverinfo: {e}")
+            print(f"Ошибка в commands/serverinfo: {e}")
+
     roleMenegment = commands.option_enum({"Назначить роль": "add", "Снять роль": "take"})
 
     @commands.slash_command(
