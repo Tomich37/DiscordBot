@@ -5,6 +5,7 @@ from app.modules.alchemy_connect import (
     Giveaway,
     GiveawayParticipant,
     GiveawayWin,
+    GuildUserStats,
     MessageStatistics,
     RecruitmentPosition,
     RecruitmentQuestion,
@@ -18,6 +19,88 @@ from datetime import datetime
 
 
 class Database:
+    def _get_or_create_user_stats(self, db, guild_id: int, user_id: int):
+        stats = db.query(GuildUserStats).filter_by(guild_id=guild_id, user_id=user_id).first()
+        if stats:
+            return stats
+
+        stats = GuildUserStats(guild_id=guild_id, user_id=user_id)
+        db.add(stats)
+        db.flush()
+        return stats
+
+    def increment_user_message_count(self, guild_id: int, user_id: int):
+        with Session(autoflush=False, bind=engine) as db:
+            stats = self._get_or_create_user_stats(db, guild_id, user_id)
+            stats.message_count += 1
+            stats.last_message_at = datetime.utcnow()
+            stats.updated_at = datetime.utcnow()
+            db.commit()
+
+    def start_user_voice_session(self, guild_id: int, user_id: int, channel_id: int):
+        with Session(autoflush=False, bind=engine) as db:
+            stats = self._get_or_create_user_stats(db, guild_id, user_id)
+            if not stats.voice_joined_at:
+                stats.voice_joined_at = datetime.utcnow()
+            stats.current_voice_channel_id = channel_id
+            stats.updated_at = datetime.utcnow()
+            db.commit()
+
+    def finish_user_voice_session(self, guild_id: int, user_id: int):
+        with Session(autoflush=False, bind=engine) as db:
+            stats = db.query(GuildUserStats).filter_by(guild_id=guild_id, user_id=user_id).first()
+            if not stats or not stats.voice_joined_at:
+                return
+
+            now = datetime.utcnow()
+            voice_seconds = int((now - stats.voice_joined_at).total_seconds())
+            if voice_seconds > 0:
+                stats.total_voice_seconds += voice_seconds
+
+            stats.current_voice_channel_id = None
+            stats.voice_joined_at = None
+            stats.updated_at = now
+            db.commit()
+
+    def reset_open_voice_sessions(self, guild_id: int):
+        with Session(autoflush=False, bind=engine) as db:
+            now = datetime.utcnow()
+            open_sessions = (
+                db.query(GuildUserStats)
+                .filter(
+                    GuildUserStats.guild_id == guild_id,
+                    GuildUserStats.voice_joined_at.isnot(None),
+                )
+                .all()
+            )
+
+            for stats in open_sessions:
+                stats.current_voice_channel_id = None
+                stats.voice_joined_at = None
+                stats.updated_at = now
+
+            db.commit()
+
+    def get_user_stats(self, guild_id: int, user_id: int) -> dict:
+        with Session(autoflush=False, bind=engine) as db:
+            stats = db.query(GuildUserStats).filter_by(guild_id=guild_id, user_id=user_id).first()
+            if not stats:
+                return {
+                    "message_count": 0,
+                    "total_voice_seconds": 0,
+                    "current_voice_channel_id": None,
+                    "voice_joined_at": None,
+                    "last_message_at": None,
+                }
+
+            return {
+                "message_count": stats.message_count,
+                "total_voice_seconds": stats.total_voice_seconds,
+                "current_voice_channel_id": stats.current_voice_channel_id,
+                "voice_joined_at": stats.voice_joined_at,
+                "last_message_at": stats.last_message_at,
+            }
+
     def create_update_contest(self, guild_id: int, channel_id: int, emoji_str: str, status: bool):
         with Session(autoflush=False, bind=engine) as db:
             # Старую таблицу сохраняем для обратной совместимости.

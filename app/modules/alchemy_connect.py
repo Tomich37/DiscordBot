@@ -121,6 +121,23 @@ class GiveawayWin(Base):
     won_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
+class GuildUserStats(Base):
+    __tablename__ = "guild_user_stats"
+    __table_args__ = (
+        UniqueConstraint("guild_id", "user_id", name="uq_guild_user_stats"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    guild_id = Column(BigInteger, nullable=False, index=True)
+    user_id = Column(BigInteger, nullable=False, index=True)
+    message_count = Column(Integer, default=0, nullable=False)
+    total_voice_seconds = Column(Integer, default=0, nullable=False)
+    current_voice_channel_id = Column(BigInteger, nullable=True)
+    voice_joined_at = Column(DateTime, nullable=True)
+    last_message_at = Column(DateTime, nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 class TrackedChannel(Base):
     __tablename__ = "tracked_channels"
     id = Column(Integer, primary_key=True, index=True)

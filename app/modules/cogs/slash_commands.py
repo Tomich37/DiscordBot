@@ -1,4 +1,5 @@
 import disnake
+from datetime import datetime, timezone
 from disnake.ext import commands
 
 from app.modules.database import Database
@@ -40,6 +41,9 @@ class SlashCommands(commands.Cog):
     def _format_timestamp(value) -> str:
         if not value:
             return "Неизвестно"
+
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
 
         timestamp = int(value.timestamp())
         return f"<t:{timestamp}:D> (<t:{timestamp}:R>)"
@@ -144,11 +148,58 @@ class SlashCommands(commands.Cog):
 
         return ", ".join(badges) if badges else "Без особых отметок"
 
+    @staticmethod
+    def _format_duration(total_seconds: int) -> str:
+        total_seconds = max(int(total_seconds or 0), 0)
+        days, remainder = divmod(total_seconds, 86400)
+        hours, remainder = divmod(remainder, 3600)
+        minutes, seconds = divmod(remainder, 60)
+
+        parts = []
+        if days:
+            parts.append(f"{days} д.")
+        if hours:
+            parts.append(f"{hours} ч.")
+        if minutes:
+            parts.append(f"{minutes} мин.")
+        if not parts:
+            parts.append(f"{seconds} сек.")
+
+        return " ".join(parts)
+
+    def _get_profile_stats(self, member: disnake.Member) -> dict:
+        stats = self.db.get_user_stats(member.guild.id, member.id)
+        total_voice_seconds = stats["total_voice_seconds"]
+
+        if stats["voice_joined_at"]:
+            active_seconds = int((datetime.utcnow() - stats["voice_joined_at"]).total_seconds())
+            total_voice_seconds += max(active_seconds, 0)
+
+        stats["total_voice_seconds"] = total_voice_seconds
+        return stats
+
+    @staticmethod
+    def _format_profile_stats(stats: dict) -> str:
+        voice_line = f"**В голосе:** `{SlashCommands._format_duration(stats['total_voice_seconds'])}`"
+        if stats["current_voice_channel_id"]:
+            voice_line = f"{voice_line}\n**Сейчас в канале:** <#{stats['current_voice_channel_id']}>"
+
+        last_message_line = ""
+        if stats["last_message_at"]:
+            last_message_line = f"\n**Последнее сообщение:** {SlashCommands._format_timestamp(stats['last_message_at'])}"
+
+        return (
+            f"**Сообщений:** `{stats['message_count']}`\n"
+            f"{voice_line}"
+            f"{last_message_line}"
+        )
+
     def _build_profile_embed(self, member: disnake.Member) -> disnake.Embed:
         top_role = member.top_role if member.top_role.name != "@everyone" else None
         accent_color = top_role.color.value if top_role and top_role.color.value else 0x5865F2
         display_name = member.display_name
         username = str(member)
+        stats = self._get_profile_stats(member)
 
         embed = disnake.Embed(
             title=f"Профиль: {display_name}",
@@ -175,6 +226,11 @@ class SlashCommands(commands.Cog):
             inline=False,
         )
         embed.add_field(name="Активность", value=self._format_activities(member), inline=False)
+        embed.add_field(
+            name="Статистика сервера",
+            value=self._format_profile_stats(stats),
+            inline=False,
+        )
         embed.add_field(name="Роли", value=self._format_roles(member), inline=False)
         embed.add_field(name="Ключевые права", value=self._format_permissions(member), inline=True)
         embed.add_field(

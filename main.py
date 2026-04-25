@@ -9,6 +9,7 @@ from disnake.ext import commands
 from disnake import ApplicationCommandInteraction
 
 from app.modules.logger import SetLogs
+from app.modules.database import Database
 from app.modules.messages import Messages
 from app.modules.scripts import Scripts
 
@@ -130,6 +131,7 @@ class Bot(commands.Bot):
         )
         self.logger = logger
         self.scripts = Scripts(logger, self)
+        self.db = Database()
         self.scheduler = AsyncIOScheduler()
         self.mi_user_id = MI_USER_ID
 
@@ -158,9 +160,58 @@ class Bot(commands.Bot):
             )
             self.scheduler.start()
             self.scheduler_running = True
+        if not hasattr(self, "voice_sessions_initialized"):
+            self._initialize_active_voice_sessions()
+            self.voice_sessions_initialized = True
         print(f"Logged in as {self.user}")
         print("------")
         self.logger.debug(f"Бот запущен как {self.user} (ID: {self.user.id})")
+
+    def _initialize_active_voice_sessions(self):
+        for guild in self.guilds:
+            self.db.reset_open_voice_sessions(guild.id)
+            for channel in guild.voice_channels:
+                for member in channel.members:
+                    if not member.bot:
+                        self.db.start_user_voice_session(
+                            guild_id=guild.id,
+                            user_id=member.id,
+                            channel_id=channel.id,
+                        )
+
+    async def on_voice_state_update(self, member, before, after):
+        if member.bot or not member.guild:
+            return
+
+        before_channel = before.channel
+        after_channel = after.channel
+        if before_channel == after_channel:
+            return
+
+        try:
+            if before_channel is None and after_channel is not None:
+                self.db.start_user_voice_session(
+                    guild_id=member.guild.id,
+                    user_id=member.id,
+                    channel_id=after_channel.id,
+                )
+                return
+
+            if before_channel is not None and after_channel is None:
+                self.db.finish_user_voice_session(
+                    guild_id=member.guild.id,
+                    user_id=member.id,
+                )
+                return
+
+            if before_channel is not None and after_channel is not None:
+                self.db.start_user_voice_session(
+                    guild_id=member.guild.id,
+                    user_id=member.id,
+                    channel_id=after_channel.id,
+                )
+        except Exception as e:
+            self.logger.exception(f"Ошибка в on_voice_state_update: {e}")
 
     async def on_slash_command(self, inter):
         self.log_user_action(
