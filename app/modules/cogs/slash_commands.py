@@ -18,7 +18,7 @@ BOT_ICON_URL = (
     "1186903657904623637/avatar_2.png"
 )
 FOOTER_TEXT = "Made by the_usual_god"
-LEADERBOARD_PAGE_SIZE = 10
+LEADERBOARD_PAGE_SIZE = 15
 
 
 class LeaderboardPaginationView(disnake.ui.View):
@@ -225,10 +225,13 @@ class SlashCommands(commands.Cog):
     def _format_duration(total_seconds: int) -> str:
         total_seconds = max(int(total_seconds or 0), 0)
         days, remainder = divmod(total_seconds, 86400)
+        years, days = divmod(days, 365)
         hours, remainder = divmod(remainder, 3600)
         minutes, seconds = divmod(remainder, 60)
 
         parts = []
+        if years:
+            parts.append(f"{years} г.")
         if days:
             parts.append(f"{days} д.")
         if hours:
@@ -301,7 +304,10 @@ class SlashCommands(commands.Cog):
 
     @staticmethod
     def _format_member_label(member: disnake.Member) -> str:
-        return member.mention if member else "Пользователь не на сервере"
+        if not member:
+            return "Пользователь не на сервере"
+
+        return member.display_name
 
     async def _get_guild_stats_with_pending_messages(self, guild_id: int) -> dict[int, dict]:
         stats_by_user_id = {
@@ -374,7 +380,7 @@ class SlashCommands(commands.Cog):
             ]
             rows.sort(key=lambda item: item[1], reverse=True)
             lines = [
-                f"**{index}.** {member.mention} — {self._format_duration(score)} на сервере"
+                f"**{index}.** {self._format_member_label(member)} — {self._format_duration(score)} на сервере"
                 for index, (member, score) in enumerate(rows, start=1)
             ]
             author_place_text = self._get_author_place_text(
