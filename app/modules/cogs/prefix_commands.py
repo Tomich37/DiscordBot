@@ -106,7 +106,7 @@ class PrefixCommands(commands.Cog):
             "Показывает текстовые и голосовые каналы сервера с их ID. В ЛС нужно указать ID сервера.\n"
             "\n"
             "`e!history ID_сервера ID_канала [количество]`\n"
-            "Выгружает историю текстового канала в UTF-8 файл от новых сообщений к старым. Если количество не указано, выгружает всю доступную историю.\n"
+            "Выгружает историю текстового или голосового канала в UTF-8 файл от новых сообщений к старым. Если количество не указано, выгружает всю доступную историю.\n"
             "\n"
             "Все команды сначала удаляют твоё сообщение, затем отправляют результат в ЛС."
         )
@@ -322,8 +322,15 @@ class PrefixCommands(commands.Cog):
             return None
 
         channel = guild.get_channel(channel_id)
-        if not isinstance(channel, disnake.TextChannel):
-            await self._send_dm_notice(ctx, f"На сервере `{guild.name}` не найден текстовый канал с ID `{channel_id}`.")
+        if not channel:
+            await self._send_dm_notice(ctx, f"На сервере `{guild.name}` не найден канал с ID `{channel_id}`.")
+            return None
+
+        if not hasattr(channel, "history"):
+            await self._send_dm_notice(
+                ctx,
+                f"Канал `#{channel.name}` найден, но текущая версия библиотеки не умеет читать историю этого типа канала.",
+            )
             return None
 
         bot_member = guild.me or guild.get_member(self.bot.user.id)
@@ -332,7 +339,7 @@ class PrefixCommands(commands.Cog):
             return None
 
         permissions = channel.permissions_for(bot_member)
-        if not permissions.view_channel or not permissions.read_message_history:
+        if not permissions.view_channel or not getattr(permissions, "read_message_history", False):
             await self._send_dm_notice(
                 ctx,
                 "У бота нет прав `Просматривать канал` или `Читать историю сообщений` в этом канале.",
@@ -341,7 +348,7 @@ class PrefixCommands(commands.Cog):
 
         return channel
 
-    async def _export_channel_history(self, ctx, channel: disnake.TextChannel, limit: int = None) -> tuple[int, int]:
+    async def _export_channel_history(self, ctx, channel, limit: int = None) -> tuple[int, int]:
         total_messages = 0
         file_count = 0
         part_number = 1
@@ -374,7 +381,7 @@ class PrefixCommands(commands.Cog):
 
         return total_messages, file_count
 
-    def _create_history_export_buffer(self, channel: disnake.TextChannel, part_number: int) -> BytesIO:
+    def _create_history_export_buffer(self, channel, part_number: int) -> BytesIO:
         buffer = BytesIO()
         buffer.write("\ufeff".encode("utf-8"))
         header = (
@@ -395,7 +402,7 @@ class PrefixCommands(commands.Cog):
         self,
         ctx,
         buffer: BytesIO,
-        channel: disnake.TextChannel,
+        channel,
         part_number: int,
     ) -> None:
         buffer.seek(0)
@@ -407,7 +414,7 @@ class PrefixCommands(commands.Cog):
 
     def _format_message_for_history_export(self, message: disnake.Message) -> str:
         created_at = message.created_at.strftime("%Y-%m-%d %H:%M:%S %Z")
-        author = f"{message.author} ({message.author.id})"
+        author = self._format_message_author_for_history_export(message)
         content = message.content or ""
         lines = [
             f"Время: {created_at}",
@@ -431,6 +438,13 @@ class PrefixCommands(commands.Cog):
 
         lines.extend(["", "-" * 80, ""])
         return "\n".join(lines)
+
+    @staticmethod
+    def _format_message_author_for_history_export(message: disnake.Message) -> str:
+        author = message.author
+        server_name = getattr(author, "display_name", None) or getattr(author, "name", str(author))
+        global_tag = str(author)
+        return f"{server_name} ({global_tag})"
 
     @staticmethod
     def _collect_message_media_links(message: disnake.Message) -> list[str]:
