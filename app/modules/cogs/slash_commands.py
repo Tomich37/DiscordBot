@@ -167,14 +167,20 @@ class SlashCommands(commands.Cog):
 
         return " ".join(parts)
 
-    def _get_profile_stats(self, member: disnake.Member) -> dict:
+    async def _get_profile_stats(self, member: disnake.Member) -> dict:
         stats = self.db.get_user_stats(member.guild.id, member.id)
         total_voice_seconds = stats["total_voice_seconds"]
+        pending_messages = 0
+
+        get_pending_count = getattr(self.bot, "get_pending_user_message_count", None)
+        if get_pending_count:
+            pending_messages = await get_pending_count(member.guild.id, member.id)
 
         if stats["voice_joined_at"]:
             active_seconds = int((datetime.utcnow() - stats["voice_joined_at"]).total_seconds())
             total_voice_seconds += max(active_seconds, 0)
 
+        stats["message_count"] += pending_messages
         stats["total_voice_seconds"] = total_voice_seconds
         return stats
 
@@ -194,12 +200,12 @@ class SlashCommands(commands.Cog):
             f"{last_message_line}"
         )
 
-    def _build_profile_embed(self, member: disnake.Member) -> disnake.Embed:
+    async def _build_profile_embed(self, member: disnake.Member) -> disnake.Embed:
         top_role = member.top_role if member.top_role.name != "@everyone" else None
         accent_color = top_role.color.value if top_role and top_role.color.value else 0x5865F2
         display_name = member.display_name
         username = str(member)
-        stats = self._get_profile_stats(member)
+        stats = await self._get_profile_stats(member)
 
         embed = disnake.Embed(
             title=f"Профиль: {display_name}",
@@ -268,7 +274,7 @@ class SlashCommands(commands.Cog):
         """
         try:
             target_member = member or inter.author
-            embed = self._build_profile_embed(target_member)
+            embed = await self._build_profile_embed(target_member)
             await inter.response.send_message(embed=embed)
         except Exception as e:
             await inter.response.send_message(

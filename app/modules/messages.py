@@ -21,7 +21,7 @@ class Messages:
             channel_id = self.message.channel.id
 
             # Общая пользовательская статистика собирается по всему серверу.
-            self.db.increment_user_message_count(
+            await self.bot.queue_user_message_stat(
                 guild_id=guild_id,
                 user_id=self.message.author.id,
             )

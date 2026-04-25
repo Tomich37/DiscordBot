@@ -37,6 +37,23 @@ class Database:
             stats.updated_at = datetime.utcnow()
             db.commit()
 
+    def bulk_increment_user_message_counts(self, counters: dict[tuple[int, int], int]):
+        if not counters:
+            return
+
+        with Session(autoflush=False, bind=engine) as db:
+            now = datetime.utcnow()
+            for (guild_id, user_id), message_count in counters.items():
+                if message_count <= 0:
+                    continue
+
+                stats = self._get_or_create_user_stats(db, guild_id, user_id)
+                stats.message_count += message_count
+                stats.last_message_at = now
+                stats.updated_at = now
+
+            db.commit()
+
     def start_user_voice_session(self, guild_id: int, user_id: int, channel_id: int):
         with Session(autoflush=False, bind=engine) as db:
             stats = self._get_or_create_user_stats(db, guild_id, user_id)

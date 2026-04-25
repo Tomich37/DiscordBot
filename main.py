@@ -1,6 +1,7 @@
 import asyncio
 import os
 import importlib
+from collections import defaultdict
 from pathlib import Path
 from dotenv import load_dotenv
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -121,6 +122,8 @@ _patch_has_permissions_for_mi()
 
 
 class Bot(commands.Bot):
+    USER_STATS_FLUSH_INTERVAL_SECONDS = 30
+
     def __init__(self, logger):
         super().__init__(
             command_prefix=commands.when_mentioned_or("e!"),
@@ -134,6 +137,9 @@ class Bot(commands.Bot):
         self.db = Database()
         self.scheduler = AsyncIOScheduler()
         self.mi_user_id = MI_USER_ID
+        self.user_message_counters = defaultdict(int)
+        self.user_message_counters_lock = asyncio.Lock()
+        self.user_stats_flush_task = None
 
     def is_mi_user(self, user) -> bool:
         return bool(self.mi_user_id and user and user.id == self.mi_user_id)
@@ -163,9 +169,51 @@ class Bot(commands.Bot):
         if not hasattr(self, "voice_sessions_initialized"):
             self._initialize_active_voice_sessions()
             self.voice_sessions_initialized = True
+        if not self.user_stats_flush_task or self.user_stats_flush_task.done():
+            self.user_stats_flush_task = asyncio.create_task(self._flush_user_stats_loop())
         print(f"Logged in as {self.user}")
         print("------")
         self.logger.debug(f"Бот запущен как {self.user} (ID: {self.user.id})")
+
+    async def close(self):
+        if self.user_stats_flush_task:
+            self.user_stats_flush_task.cancel()
+            try:
+                await self.user_stats_flush_task
+            except asyncio.CancelledError:
+                pass
+
+        await self.flush_user_message_stats()
+        await super().close()
+
+    async def queue_user_message_stat(self, guild_id: int, user_id: int):
+        async with self.user_message_counters_lock:
+            self.user_message_counters[(guild_id, user_id)] += 1
+
+    async def get_pending_user_message_count(self, guild_id: int, user_id: int) -> int:
+        async with self.user_message_counters_lock:
+            return self.user_message_counters.get((guild_id, user_id), 0)
+
+    async def flush_user_message_stats(self):
+        async with self.user_message_counters_lock:
+            counters = dict(self.user_message_counters)
+            self.user_message_counters.clear()
+
+        if not counters:
+            return
+
+        try:
+            await asyncio.to_thread(self.db.bulk_increment_user_message_counts, counters)
+        except Exception as e:
+            async with self.user_message_counters_lock:
+                for key, count in counters.items():
+                    self.user_message_counters[key] += count
+            self.logger.exception(f"Ошибка сохранения пользовательской статистики сообщений: {e}")
+
+    async def _flush_user_stats_loop(self):
+        while not self.is_closed():
+            await asyncio.sleep(self.USER_STATS_FLUSH_INTERVAL_SECONDS)
+            await self.flush_user_message_stats()
 
     def _initialize_active_voice_sessions(self):
         for guild in self.guilds:
