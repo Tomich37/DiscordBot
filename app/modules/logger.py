@@ -1,5 +1,6 @@
 import os
 import logging
+import sys
 from datetime import date, datetime, timedelta
 
 
@@ -136,8 +137,15 @@ class DailyFileHandler(logging.Handler):
 class SetLogs:
     def __init__(self) -> None:
         # Логи делим по назначению и по дням, чтобы проще искать пользовательские и технические события.
-        logs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
+        logs_dir = os.getenv(
+            "LOGS_DIR",
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs"),
+        )
         os.makedirs(logs_dir, exist_ok=True)
+        debug_enabled = os.getenv("DEBUG_LOGS", "").lower() in {"1", "true", "yes", "on"}
+        technical_levels = {logging.WARNING, logging.ERROR, logging.CRITICAL}
+        if debug_enabled:
+            technical_levels.add(logging.DEBUG)
 
         log_format = "%(asctime)s - %(levelname)s - %(message)s"
         date_format = "%Y-%m-%d %H:%M:%S"
@@ -158,15 +166,22 @@ class SetLogs:
 
         technical_handler = DailyFileHandler(logs_dir, "technical", backup_days=30)
         technical_handler.setLevel(logging.DEBUG)
-        technical_handler.addFilter(
-            LevelFilter({
-                logging.DEBUG,
-                logging.WARNING,
-                logging.ERROR,
-                logging.CRITICAL,
-            })
-        )
+        technical_handler.addFilter(LevelFilter(technical_levels))
         technical_handler.setFormatter(formatter)
+
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setLevel(logging.DEBUG if debug_enabled else logging.INFO)
+        console_handler.setFormatter(formatter)
 
         self.logger.addHandler(info_handler)
         self.logger.addHandler(technical_handler)
+        self.logger.addHandler(console_handler)
+
+        # Voice-подключение и ffmpeg живут внутри disnake, поэтому отдельно пишем их debug в technical.
+        for logger_name in ("disnake.voice_client", "disnake.player", "disnake.gateway"):
+            external_logger = logging.getLogger(logger_name)
+            external_logger.setLevel(logging.DEBUG if debug_enabled else logging.WARNING)
+            external_logger.propagate = False
+            external_logger.handlers.clear()
+            external_logger.addHandler(technical_handler)
+            external_logger.addHandler(console_handler)

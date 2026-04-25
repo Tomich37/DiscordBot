@@ -5,4 +5,8 @@ psycopg2
 python-dotenv
 matplotlib
 moviepy
+imageio-ffmpeg
 apscheduler
+yt-dlp
+PyNaCl
+dave.py

@@ -139,6 +139,34 @@ class GuildUserStats(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
+class MusicPlaylist(Base):
+    __tablename__ = "music_playlists"
+
+    id = Column(Integer, primary_key=True, index=True)
+    guild_id = Column(BigInteger, nullable=False, index=True)
+    user_id = Column(BigInteger, nullable=False, index=True)
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class MusicPlaylistTrack(Base):
+    __tablename__ = "music_playlist_tracks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    playlist_id = Column(Integer, ForeignKey("music_playlists.id"), nullable=False, index=True)
+    position = Column(Integer, nullable=False, index=True)
+    title = Column(String, nullable=False)
+    webpage_url = Column(Text, nullable=False)
+    duration = Column(Integer, nullable=True)
+    status = Column(String(20), default="pending", nullable=False, index=True)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    started_at = Column(DateTime, nullable=True)
+    finished_at = Column(DateTime, nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 class TrackedChannel(Base):
     __tablename__ = "tracked_channels"
     id = Column(Integer, primary_key=True, index=True)
