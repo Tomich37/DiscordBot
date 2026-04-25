@@ -281,11 +281,26 @@ class SlashCommands(commands.Cog):
         return stats
 
     @staticmethod
-    def _format_profile_stats(stats: dict) -> str:
+    def _format_place(place: int | None) -> str:
+        if place is None:
+            return "места пока нет"
+
+        return f"{place} место"
+
+    @staticmethod
+    def _format_profile_stats(stats: dict, ranks: dict[str, int | None] | None = None) -> str:
+        ranks = ranks or {}
         observation_days = SlashCommands._get_observation_days(stats)
         messages_per_day = stats["message_count"] / observation_days
         voice_seconds_per_day = stats["total_voice_seconds"] / observation_days
-        voice_line = f"**В голосе:** `{SlashCommands._format_duration(stats['total_voice_seconds'])}`"
+        messages_rank = SlashCommands._format_place(ranks.get("messages_total"))
+        messages_daily_rank = SlashCommands._format_place(ranks.get("messages_daily"))
+        voice_rank = SlashCommands._format_place(ranks.get("voice_total"))
+        voice_daily_rank = SlashCommands._format_place(ranks.get("voice_daily"))
+        voice_line = (
+            f"**В голосе:** `{SlashCommands._format_duration(stats['total_voice_seconds'])}` "
+            f"({voice_rank})"
+        )
         if stats["current_voice_channel_id"]:
             voice_line = f"{voice_line}\n**Сейчас в канале:** <#{stats['current_voice_channel_id']}>"
 
@@ -294,12 +309,11 @@ class SlashCommands(commands.Cog):
             last_message_line = f"\n**Последнее сообщение:** {SlashCommands._format_timestamp(stats['last_message_at'])}"
 
         return (
-            f"**Сообщений:** `{stats['message_count']}`\n"
-            f"**Сообщений в день:** `~{SlashCommands._format_average_messages(messages_per_day)}`\n"
+            f"**Сообщений:** `{stats['message_count']}` ({messages_rank})\n"
+            f"**Сообщений в день:** `~{SlashCommands._format_average_messages(messages_per_day)}` ({messages_daily_rank})\n"
             f"{voice_line}"
-            f"\n**Голоса в день:** `~{SlashCommands._format_duration(int(voice_seconds_per_day))}`"
+            f"\n**Голоса в день:** `~{SlashCommands._format_duration(int(voice_seconds_per_day))}` ({voice_daily_rank})"
             f"{last_message_line}"
-            f"\n**Статистика с:** {SlashCommands._format_timestamp(stats.get('stats_started_at'))}"
         )
 
     @staticmethod
@@ -336,6 +350,18 @@ class SlashCommands(commands.Cog):
         return stats_by_user_id
 
     @staticmethod
+    def _get_empty_stats_for_user(user_id: int) -> dict:
+        return {
+            "user_id": user_id,
+            "message_count": 0,
+            "total_voice_seconds": 0,
+            "stats_started_at": None,
+            "current_voice_channel_id": None,
+            "voice_joined_at": None,
+            "last_message_at": None,
+        }
+
+    @staticmethod
     def _add_active_voice_seconds(stats: dict) -> int:
         total_voice_seconds = stats["total_voice_seconds"]
         if stats["voice_joined_at"]:
@@ -356,6 +382,49 @@ class SlashCommands(commands.Cog):
             joined_at = joined_at.replace(tzinfo=None)
 
         return max(int((datetime.utcnow() - joined_at).total_seconds()), 0)
+
+    @staticmethod
+    def _get_rank_for_user(rows: list[tuple[int, float]], user_id: int) -> int | None:
+        sorted_rows = sorted(rows, key=lambda item: item[1], reverse=True)
+        previous_score = None
+        previous_place = None
+
+        for index, (row_user_id, score) in enumerate(sorted_rows, start=1):
+            if previous_score is None or score != previous_score:
+                previous_score = score
+                previous_place = index
+
+            if row_user_id == user_id:
+                return previous_place
+
+        return None
+
+    async def _get_profile_ranks(self, member: disnake.Member) -> dict[str, int | None]:
+        stats_by_user_id = await self._get_guild_stats_with_pending_messages(member.guild.id)
+        message_rows = []
+        message_daily_rows = []
+        voice_rows = []
+        voice_daily_rows = []
+
+        for guild_member in member.guild.members:
+            if guild_member.bot:
+                continue
+
+            stats = stats_by_user_id.get(guild_member.id, self._get_empty_stats_for_user(guild_member.id))
+            observation_days = self._get_observation_days(stats)
+            total_voice_seconds = self._add_active_voice_seconds(stats)
+
+            message_rows.append((guild_member.id, stats["message_count"]))
+            message_daily_rows.append((guild_member.id, stats["message_count"] / observation_days))
+            voice_rows.append((guild_member.id, total_voice_seconds))
+            voice_daily_rows.append((guild_member.id, total_voice_seconds / observation_days))
+
+        return {
+            "messages_total": self._get_rank_for_user(message_rows, member.id),
+            "messages_daily": self._get_rank_for_user(message_daily_rows, member.id),
+            "voice_total": self._get_rank_for_user(voice_rows, member.id),
+            "voice_daily": self._get_rank_for_user(voice_daily_rows, member.id),
+        }
 
     async def _build_leaderboard_page_embeds(
         self,
@@ -486,6 +555,7 @@ class SlashCommands(commands.Cog):
         display_name = member.display_name
         username = str(member)
         stats = await self._get_profile_stats(member)
+        ranks = await self._get_profile_ranks(member)
 
         embed = disnake.Embed(
             title=f"Профиль: {display_name}",
@@ -514,7 +584,7 @@ class SlashCommands(commands.Cog):
         embed.add_field(name="Активность", value=self._format_activities(member), inline=False)
         embed.add_field(
             name="Статистика сервера",
-            value=self._format_profile_stats(stats),
+            value=self._format_profile_stats(stats, ranks),
             inline=False,
         )
         embed.add_field(name="Роли", value=self._format_roles(member), inline=False)
