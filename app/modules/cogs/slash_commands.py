@@ -7,6 +7,18 @@ from app.modules.modals.recruitment_setup_modal import RecruitmentSetupModal
 from app.modules.scripts import Scripts
 
 
+BOT_NAME = "Emiliabot"
+BOT_URL = (
+    "https://discord.com/api/oauth2/authorize"
+    "?client_id=602393416017379328&permissions=8&scope=bot+applications.commands"
+)
+BOT_ICON_URL = (
+    "https://media.discordapp.net/attachments/1186903406196047954/"
+    "1186903657904623637/avatar_2.png"
+)
+FOOTER_TEXT = "Made by the_usual_god"
+
+
 class SlashCommands(commands.Cog):
     def __init__(self, bot, logger):
         self.bot = bot
@@ -22,6 +34,192 @@ class SlashCommands(commands.Cog):
     )
     async def ping(self, inter):
         await inter.response.send_message(f"Понг! {round(self.bot.latency * 1000)}мс")
+
+    @staticmethod
+    def _format_timestamp(value) -> str:
+        if not value:
+            return "Неизвестно"
+
+        timestamp = int(value.timestamp())
+        return f"<t:{timestamp}:D> (<t:{timestamp}:R>)"
+
+    @staticmethod
+    def _format_status(member: disnake.Member) -> str:
+        status_names = {
+            disnake.Status.online: "В сети",
+            disnake.Status.idle: "Отошёл",
+            disnake.Status.dnd: "Не беспокоить",
+            disnake.Status.offline: "Не в сети",
+            disnake.Status.invisible: "Не в сети",
+        }
+        return status_names.get(member.status, str(member.status))
+
+    @staticmethod
+    def _format_roles(member: disnake.Member, limit: int = 12) -> str:
+        roles = [
+            role
+            for role in sorted(member.roles, key=lambda item: item.position, reverse=True)
+            if role.name != "@everyone"
+        ]
+
+        if not roles:
+            return "Ролей нет"
+
+        shown_roles = roles[:limit]
+        roles_text = " ".join(role.mention for role in shown_roles)
+        hidden_count = len(roles) - len(shown_roles)
+        if hidden_count > 0:
+            roles_text = f"{roles_text}\n+ ещё {hidden_count}"
+
+        return roles_text
+
+    @staticmethod
+    def _format_permissions(member: disnake.Member) -> str:
+        permissions = member.guild_permissions
+        important_permissions = [
+            ("administrator", "Администратор"),
+            ("manage_guild", "Управление сервером"),
+            ("manage_roles", "Управление ролями"),
+            ("manage_channels", "Управление каналами"),
+            ("kick_members", "Кик участников"),
+            ("ban_members", "Бан участников"),
+            ("manage_messages", "Управление сообщениями"),
+            ("moderate_members", "Тайм-ауты"),
+        ]
+        enabled_permissions = [
+            title
+            for permission_name, title in important_permissions
+            if getattr(permissions, permission_name, False)
+        ]
+
+        if not enabled_permissions:
+            return "Особых прав нет"
+
+        return "\n".join(f"• {permission}" for permission in enabled_permissions[:8])
+
+    @staticmethod
+    def _format_activities(member: disnake.Member) -> str:
+        activities = [
+            activity
+            for activity in member.activities
+            if getattr(activity, "name", None)
+        ]
+
+        if not activities:
+            return "Активность не отображается"
+
+        activity_lines = []
+        for activity in activities[:3]:
+            activity_type = getattr(activity, "type", None)
+            if activity_type == disnake.ActivityType.playing:
+                prefix = "Играет"
+            elif activity_type == disnake.ActivityType.streaming:
+                prefix = "Стримит"
+            elif activity_type == disnake.ActivityType.listening:
+                prefix = "Слушает"
+            elif activity_type == disnake.ActivityType.watching:
+                prefix = "Смотрит"
+            elif activity_type == disnake.ActivityType.competing:
+                prefix = "Соревнуется"
+            else:
+                prefix = "Активность"
+
+            activity_lines.append(f"• {prefix}: {activity.name}")
+
+        return "\n".join(activity_lines)
+
+    @staticmethod
+    def _format_badges(member: disnake.Member) -> str:
+        badges = []
+
+        if member.bot:
+            badges.append("Бот")
+        if member.premium_since:
+            badges.append("Бустер сервера")
+        if member.guild_permissions.administrator:
+            badges.append("Администратор")
+        if member.guild.owner_id == member.id:
+            badges.append("Владелец сервера")
+
+        return ", ".join(badges) if badges else "Без особых отметок"
+
+    def _build_profile_embed(self, member: disnake.Member) -> disnake.Embed:
+        top_role = member.top_role if member.top_role.name != "@everyone" else None
+        accent_color = top_role.color.value if top_role and top_role.color.value else 0x5865F2
+        display_name = member.display_name
+        username = str(member)
+
+        embed = disnake.Embed(
+            title=f"Профиль: {display_name}",
+            description=f"{member.mention}\n`{username}`",
+            color=accent_color,
+        )
+        embed.set_author(name=BOT_NAME, url=BOT_URL, icon_url=BOT_ICON_URL)
+        embed.set_thumbnail(url=member.display_avatar.url)
+        embed.add_field(
+            name="Основное",
+            value=(
+                f"**Статус:** {self._format_status(member)}\n"
+                f"**Отметки:** {self._format_badges(member)}\n"
+                f"**Высшая роль:** {top_role.mention if top_role else 'Нет'}"
+            ),
+            inline=False,
+        )
+        embed.add_field(
+            name="Даты",
+            value=(
+                f"**Аккаунт создан:** {self._format_timestamp(member.created_at)}\n"
+                f"**На сервере с:** {self._format_timestamp(member.joined_at)}"
+            ),
+            inline=False,
+        )
+        embed.add_field(name="Активность", value=self._format_activities(member), inline=False)
+        embed.add_field(name="Роли", value=self._format_roles(member), inline=False)
+        embed.add_field(name="Ключевые права", value=self._format_permissions(member), inline=True)
+        embed.add_field(
+            name="ID",
+            value=f"**Пользователь:** `{member.id}`\n**Сервер:** `{member.guild.id}`",
+            inline=True,
+        )
+
+        if member.premium_since:
+            embed.add_field(
+                name="Буст сервера",
+                value=self._format_timestamp(member.premium_since),
+                inline=False,
+            )
+
+        embed.set_footer(text=FOOTER_TEXT)
+        return embed
+
+    @commands.slash_command(
+        name="profile",
+        description="Показать красивый профиль участника",
+        dm_permission=False,
+    )
+    async def profile(
+        self,
+        inter: disnake.GuildCommandInteraction,
+        member: disnake.Member = None,
+    ):
+        """
+        Профиль участника сервера.
+
+        Parameters
+        ----------
+        member: Участник, профиль которого нужно показать. Если не указан, будет показан ваш профиль
+        """
+        try:
+            target_member = member or inter.author
+            embed = self._build_profile_embed(target_member)
+            await inter.response.send_message(embed=embed)
+        except Exception as e:
+            await inter.response.send_message(
+                "Не получилось собрать профиль пользователя.",
+                ephemeral=True,
+            )
+            self.logger.exception(f"Ошибка в commands/profile: {e}")
+            print(f"Ошибка в commands/profile: {e}")
 
     roleMenegment = commands.option_enum({"Назначить роль": "add", "Снять роль": "take"})
 
