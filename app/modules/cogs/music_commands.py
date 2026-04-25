@@ -609,6 +609,19 @@ class MusicCommands(commands.Cog):
 
         return "Музыка остановлена. Чужой личный плейлист не очищался."
 
+    async def disconnect_because_channel_empty(self, guild: disnake.Guild, voice_client: disnake.VoiceClient) -> None:
+        state = self._get_state(guild.id)
+        state.stop_reason = "leave"
+        state.now_playing_message = None
+        channel_id = getattr(voice_client.channel, "id", None)
+        await voice_client.disconnect(force=True)
+        self.guild_states.pop(guild.id, None)
+        self.logger.info(
+            "Музыка: авто-отключение, в канале не осталось слушателей | guild=%s channel=%s",
+            guild.id,
+            channel_id,
+        )
+
     def build_queue_embed(self, guild: disnake.Guild, user_id: int, page: int = 0) -> disnake.Embed:
         state = self._get_state(guild.id)
         page_data = self.bot.db.get_music_playlist_page(guild.id, user_id, page, QUEUE_PAGE_SIZE)
