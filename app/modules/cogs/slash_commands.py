@@ -18,6 +18,70 @@ BOT_ICON_URL = (
     "1186903657904623637/avatar_2.png"
 )
 FOOTER_TEXT = "Made by the_usual_god"
+LEADERBOARD_PAGE_SIZE = 10
+
+
+class LeaderboardPaginationView(disnake.ui.View):
+    def __init__(self, author_id: int, pages: list[disnake.Embed]) -> None:
+        self.author_id = author_id
+        self.pages = pages
+        self.current_page = 0
+        super().__init__(timeout=180)
+        self._sync_buttons()
+
+    def _sync_buttons(self) -> None:
+        has_multiple_pages = len(self.pages) > 1
+        self.previous_page.disabled = not has_multiple_pages or self.current_page == 0
+        self.next_page.disabled = (
+            not has_multiple_pages or self.current_page == len(self.pages) - 1
+        )
+
+    async def interaction_check(self, interaction: disnake.MessageInteraction) -> bool:
+        if interaction.author.id == self.author_id:
+            return True
+
+        await interaction.response.send_message(
+            "Эти кнопки относятся к чужому лидерборду. Вызовите `/leaderboard` сами, чтобы листать свою выдачу.",
+            ephemeral=True,
+        )
+        return False
+
+    async def _show_current_page(self, interaction: disnake.MessageInteraction) -> None:
+        self._sync_buttons()
+        await interaction.response.edit_message(
+            embed=self.pages[self.current_page],
+            view=self,
+        )
+
+    @disnake.ui.button(
+        label="Назад",
+        style=disnake.ButtonStyle.secondary,
+        custom_id="leaderboard_previous_page",
+    )
+    async def previous_page(
+        self,
+        button: disnake.ui.Button,
+        interaction: disnake.MessageInteraction,
+    ) -> None:
+        if self.current_page > 0:
+            self.current_page -= 1
+
+        await self._show_current_page(interaction)
+
+    @disnake.ui.button(
+        label="Вперёд",
+        style=disnake.ButtonStyle.primary,
+        custom_id="leaderboard_next_page",
+    )
+    async def next_page(
+        self,
+        button: disnake.ui.Button,
+        interaction: disnake.MessageInteraction,
+    ) -> None:
+        if self.current_page < len(self.pages) - 1:
+            self.current_page += 1
+
+        await self._show_current_page(interaction)
 
 
 class SlashCommands(commands.Cog):
@@ -29,6 +93,15 @@ class SlashCommands(commands.Cog):
 
     convert_formats = commands.option_enum({"MOV": "mov", "GIF (до 10 сек)": "gif"})
     profile_asset_types = commands.option_enum({"Пользователь": "user", "Сервер": "server"})
+    leaderboard_types = commands.option_enum(
+        {
+            "Всего сообщений": "messages_total",
+            "Сообщений в день": "messages_daily",
+            "Голосовая активность": "voice_total",
+            "Голосовая активность в день": "voice_daily",
+            "Старички сервера": "server_age",
+        }
+    )
 
     @commands.slash_command(
         name="ping",
@@ -226,6 +299,181 @@ class SlashCommands(commands.Cog):
             f"\n**Статистика с:** {SlashCommands._format_timestamp(stats.get('stats_started_at'))}"
         )
 
+    @staticmethod
+    def _format_member_label(member: disnake.Member) -> str:
+        return member.mention if member else "Пользователь не на сервере"
+
+    async def _get_guild_stats_with_pending_messages(self, guild_id: int) -> dict[int, dict]:
+        stats_by_user_id = {
+            stats["user_id"]: stats
+            for stats in self.db.get_guild_user_stats(guild_id)
+        }
+
+        get_pending_counts = getattr(self.bot, "get_pending_guild_message_counts", None)
+        if not get_pending_counts:
+            return stats_by_user_id
+
+        pending_counts = await get_pending_counts(guild_id)
+        for user_id, pending_count in pending_counts.items():
+            if user_id not in stats_by_user_id:
+                stats_by_user_id[user_id] = {
+                    "user_id": user_id,
+                    "message_count": 0,
+                    "total_voice_seconds": 0,
+                    "stats_started_at": datetime.utcnow(),
+                    "current_voice_channel_id": None,
+                    "voice_joined_at": None,
+                    "last_message_at": None,
+                }
+            stats_by_user_id[user_id]["message_count"] += pending_count
+
+        return stats_by_user_id
+
+    @staticmethod
+    def _add_active_voice_seconds(stats: dict) -> int:
+        total_voice_seconds = stats["total_voice_seconds"]
+        if stats["voice_joined_at"]:
+            voice_joined_at = stats["voice_joined_at"]
+            if voice_joined_at.tzinfo is not None:
+                voice_joined_at = voice_joined_at.replace(tzinfo=None)
+            active_seconds = int((datetime.utcnow() - voice_joined_at).total_seconds())
+            total_voice_seconds += max(active_seconds, 0)
+        return total_voice_seconds
+
+    @staticmethod
+    def _get_member_server_age_seconds(member: disnake.Member) -> int:
+        joined_at = member.joined_at
+        if not joined_at:
+            return 0
+
+        if joined_at.tzinfo is not None:
+            joined_at = joined_at.replace(tzinfo=None)
+
+        return max(int((datetime.utcnow() - joined_at).total_seconds()), 0)
+
+    async def _build_leaderboard_page_embeds(
+        self,
+        guild: disnake.Guild,
+        leaderboard_type: str,
+        author_id: int,
+    ) -> list[disnake.Embed]:
+        type_titles = {
+            "messages_total": "Топ по сообщениям",
+            "messages_daily": "Топ по сообщениям в день",
+            "voice_total": "Топ по голосовой активности",
+            "voice_daily": "Топ по голосовой активности в день",
+            "server_age": "Старички сервера",
+        }
+        title = type_titles[leaderboard_type]
+
+        if leaderboard_type == "server_age":
+            rows = [
+                (member, self._get_member_server_age_seconds(member))
+                for member in guild.members
+                if not member.bot and member.joined_at
+            ]
+            rows.sort(key=lambda item: item[1], reverse=True)
+            lines = [
+                f"**{index}.** {member.mention} — {self._format_duration(score)} на сервере"
+                for index, (member, score) in enumerate(rows, start=1)
+            ]
+            author_place_text = self._get_author_place_text(
+                rows=rows,
+                author_id=author_id,
+                value_formatter=lambda row: f"{self._format_duration(row[1])} на сервере",
+            )
+            return self._build_leaderboard_pages(
+                title,
+                lines,
+                "Пока нет данных по участникам сервера.",
+                author_place_text,
+            )
+
+        stats_by_user_id = await self._get_guild_stats_with_pending_messages(guild.id)
+        rows = []
+
+        for user_id, stats in stats_by_user_id.items():
+            member = guild.get_member(user_id)
+            if not member or member.bot:
+                continue
+
+            observation_days = self._get_observation_days(stats)
+            total_voice_seconds = self._add_active_voice_seconds(stats)
+
+            if leaderboard_type == "messages_total":
+                score = stats["message_count"]
+                value = f"{score} сообщений"
+            elif leaderboard_type == "messages_daily":
+                score = stats["message_count"] / observation_days
+                value = f"~{self._format_average_messages(score)} сообщений в день"
+            elif leaderboard_type == "voice_total":
+                score = total_voice_seconds
+                value = self._format_duration(score)
+            else:
+                score = total_voice_seconds / observation_days
+                value = f"~{self._format_duration(int(score))} в день"
+
+            if score > 0:
+                rows.append((member, score, value))
+
+        rows.sort(key=lambda item: item[1], reverse=True)
+        lines = [
+            f"**{index}.** {self._format_member_label(member)} — {value}"
+            for index, (member, _, value) in enumerate(rows, start=1)
+        ]
+        author_place_text = self._get_author_place_text(
+            rows=rows,
+            author_id=author_id,
+            value_formatter=lambda row: row[2],
+        )
+
+        return self._build_leaderboard_pages(
+            title,
+            lines,
+            "Пока нет данных для этого лидерборда.",
+            author_place_text,
+        )
+
+    @staticmethod
+    def _get_author_place_text(
+        rows: list[tuple],
+        author_id: int,
+        value_formatter,
+    ) -> str:
+        for index, row in enumerate(rows, start=1):
+            member = row[0]
+            if member.id == author_id:
+                return f"Ваше место: **{index}** — {value_formatter(row)}"
+
+        return "Ваше место: данных пока нет"
+
+    @staticmethod
+    def _build_leaderboard_pages(
+        title: str,
+        lines: list[str],
+        empty_text: str,
+        author_place_text: str,
+    ) -> list[disnake.Embed]:
+        if not lines:
+            lines = [empty_text]
+
+        page_count = max((len(lines) + LEADERBOARD_PAGE_SIZE - 1) // LEADERBOARD_PAGE_SIZE, 1)
+        pages = []
+        for page_index in range(page_count):
+            page_lines = lines[
+                page_index * LEADERBOARD_PAGE_SIZE:(page_index + 1) * LEADERBOARD_PAGE_SIZE
+            ]
+            embed = disnake.Embed(
+                title=title,
+                description=f"{author_place_text}\n\n" + "\n".join(page_lines),
+                color=0x5865F2,
+            )
+            embed.set_author(name=BOT_NAME, url=BOT_URL, icon_url=BOT_ICON_URL)
+            embed.set_footer(text=f"{FOOTER_TEXT} | Страница {page_index + 1}/{page_count}")
+            pages.append(embed)
+
+        return pages
+
     async def _build_profile_embed(self, member: disnake.Member) -> disnake.Embed:
         top_role = member.top_role if member.top_role.name != "@everyone" else None
         accent_color = top_role.color.value if top_role and top_role.color.value else 0x5865F2
@@ -309,6 +557,42 @@ class SlashCommands(commands.Cog):
             )
             self.logger.exception(f"Ошибка в commands/profile: {e}")
             print(f"Ошибка в commands/profile: {e}")
+
+    @commands.slash_command(
+        name="leaderboard",
+        description="Показать лидерборд участников сервера",
+        dm_permission=False,
+    )
+    async def leaderboard(
+        self,
+        inter: disnake.GuildCommandInteraction,
+        leaderboard_type: leaderboard_types = "messages_total",
+    ):
+        """
+        Лидерборд участников сервера.
+
+        Parameters
+        ----------
+        leaderboard_type: Какой рейтинг показать
+        """
+        try:
+            pages = await self._build_leaderboard_page_embeds(
+                guild=inter.guild,
+                leaderboard_type=leaderboard_type,
+                author_id=inter.author.id,
+            )
+            view = LeaderboardPaginationView(inter.author.id, pages)
+            if len(pages) > 1:
+                await inter.response.send_message(embed=pages[0], view=view)
+            else:
+                await inter.response.send_message(embed=pages[0])
+        except Exception as e:
+            await inter.response.send_message(
+                "Не получилось собрать лидерборд сервера.",
+                ephemeral=True,
+            )
+            self.logger.exception(f"Ошибка в commands/leaderboard: {e}")
+            print(f"Ошибка в commands/leaderboard: {e}")
 
     def _build_asset_embed(
         self,
