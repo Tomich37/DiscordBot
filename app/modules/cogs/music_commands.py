@@ -71,6 +71,7 @@ class GuildMusicState:
         self.current: Optional[Track] = None
         self.owner_id: Optional[int] = None
         self.stop_reason: Optional[str] = None
+        self.now_playing_message: Optional[disnake.Message] = None
         self.lock = asyncio.Lock()
 
 
@@ -512,6 +513,7 @@ class MusicCommands(commands.Cog):
         channel: disnake.abc.Messageable,
         track: Track,
     ) -> None:
+        state = self._get_state(guild.id)
         embed = disnake.Embed(
             title="Сейчас играет",
             description=f"[{track.title}]({track.webpage_url})",
@@ -519,7 +521,27 @@ class MusicCommands(commands.Cog):
         )
         embed.add_field(name="Длительность", value=self._format_duration(track.duration))
         embed.add_field(name="Добавил", value=track.requested_by)
-        await channel.send(embed=embed, view=MusicControlView(self, guild.id))
+        view = MusicControlView(self, guild.id)
+
+        if state.now_playing_message:
+            try:
+                await state.now_playing_message.edit(embed=embed, view=view)
+                return
+            except (disnake.NotFound, disnake.Forbidden):
+                self.logger.warning(
+                    "Музыка: сообщение текущего трека недоступно, создаю новое | guild=%s",
+                    guild.id,
+                )
+                state.now_playing_message = None
+            except Exception as e:
+                self.logger.exception(
+                    "Музыка: не удалось обновить сообщение текущего трека | guild=%s error=%s",
+                    guild.id,
+                    e,
+                )
+                state.now_playing_message = None
+
+        state.now_playing_message = await channel.send(embed=embed, view=view)
 
     def skip_track(self, guild: disnake.Guild, voice_client: disnake.VoiceClient, user_id: int) -> str:
         if not (voice_client.is_playing() or voice_client.is_paused()):
@@ -721,6 +743,8 @@ class MusicCommands(commands.Cog):
 
             if stop_reason in {"stop", "leave"}:
                 state.current = None
+                if stop_reason == "leave":
+                    state.now_playing_message = None
                 return
 
             future = asyncio.run_coroutine_threadsafe(
@@ -980,6 +1004,7 @@ class MusicCommands(commands.Cog):
             )
             state = self._get_state(inter.guild.id)
             state.stop_reason = "leave"
+            state.now_playing_message = None
             await voice_client.disconnect(force=True)
             if inter.guild:
                 self.guild_states.pop(inter.guild.id, None)
