@@ -235,6 +235,30 @@ class Bot(commands.Bot):
                             channel_id=channel.id,
                         )
 
+    async def _disconnect_bot_from_empty_voice_channel(self, channel):
+        if channel is None:
+            return
+
+        voice_client = channel.guild.voice_client
+        if not voice_client or not voice_client.channel:
+            return
+        if voice_client.channel.id != channel.id:
+            return
+        if any(not member.bot for member in channel.members):
+            return
+
+        music_cog = self.get_cog("MusicCommands")
+        if music_cog and hasattr(music_cog, "disconnect_because_channel_empty"):
+            await music_cog.disconnect_because_channel_empty(channel.guild, voice_client)
+            return
+
+        await voice_client.disconnect(force=True)
+        self.logger.info(
+            "Музыка: авто-отключение, в канале не осталось слушателей | guild=%s channel=%s",
+            channel.guild.id,
+            channel.id,
+        )
+
     async def on_voice_state_update(self, member, before, after):
         if member.bot or not member.guild:
             return
@@ -258,6 +282,7 @@ class Bot(commands.Bot):
                     guild_id=member.guild.id,
                     user_id=member.id,
                 )
+                await self._disconnect_bot_from_empty_voice_channel(before_channel)
                 return
 
             if before_channel is not None and after_channel is not None:
@@ -266,6 +291,7 @@ class Bot(commands.Bot):
                     user_id=member.id,
                     channel_id=after_channel.id,
                 )
+                await self._disconnect_bot_from_empty_voice_channel(before_channel)
         except Exception as e:
             self.logger.exception(f"Ошибка в on_voice_state_update: {e}")
 
