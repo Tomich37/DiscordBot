@@ -317,6 +317,17 @@ class SlashCommands(commands.Cog):
         )
 
     @staticmethod
+    def _format_alchemy_stats(stats: dict) -> str:
+        if not stats.get("exists"):
+            return "Профиль алхимика ещё не создан. Используйте `/alchemy start`."
+
+        return (
+            f"**Баланс:** `{stats['balance']}`\n"
+            f"**Элементов:** `{stats['element_count']}`\n"
+            f"**Первые открытия:** `{stats['first_discovery_count']}`"
+        )
+
+    @staticmethod
     def _format_member_label(member: disnake.Member) -> str:
         if not member:
             return "Пользователь не на сервере"
@@ -556,6 +567,7 @@ class SlashCommands(commands.Cog):
         username = str(member)
         stats = await self._get_profile_stats(member)
         ranks = await self._get_profile_ranks(member)
+        alchemy_stats = self.db.get_alchemy_profile(member.guild.id, member.id)
 
         embed = disnake.Embed(
             title=f"Профиль: {display_name}",
@@ -585,6 +597,11 @@ class SlashCommands(commands.Cog):
         embed.add_field(
             name="Статистика сервера",
             value=self._format_profile_stats(stats, ranks),
+            inline=False,
+        )
+        embed.add_field(
+            name="Алхимия",
+            value=self._format_alchemy_stats(alchemy_stats),
             inline=False,
         )
         embed.add_field(name="Роли", value=self._format_roles(member), inline=False)
