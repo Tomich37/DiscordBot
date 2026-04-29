@@ -330,6 +330,18 @@ class Database:
             db.commit()
             return {"status": "refunded", "balance": player.balance}
 
+    def grant_alchemy_currency(self, guild_id: int, user_id: int, amount: int, reason: str = "admin_grant") -> dict:
+        with Session(autoflush=False, bind=engine) as db:
+            player = self._get_alchemy_player(db, guild_id, user_id)
+            if not player:
+                return {"status": "not_started"}
+
+            player.balance += amount
+            player.updated_at = datetime.utcnow()
+            self._add_alchemy_transaction(db, player, amount, reason)
+            db.commit()
+            return {"status": "granted", "balance": player.balance}
+
     def get_alchemy_recipe(self, guild_id: int, left_element: str, right_element: str) -> dict | None:
         with Session(autoflush=False, bind=engine) as db:
             recipe = (

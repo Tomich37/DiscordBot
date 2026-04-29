@@ -99,6 +99,10 @@ class PrefixCommands(commands.Cog):
             "`e!logs tech 30`\n"
             "Отправляет указанное количество строк выбранного лога.\n"
             "\n"
+            "`e!alchemy_balance ID_пользователя количество`\n"
+            "Начисляет валюту алхимии пользователю по ID на текущем сервере.\n"
+            "Пример: `e!alchemy_balance 123456789012345678 50`\n"
+            "\n"
             "`e!servers`\n"
             "Показывает серверы, где установлен бот, и уже существующую ссылку, если бот может её прочитать.\n"
             "\n"
@@ -179,6 +183,46 @@ class PrefixCommands(commands.Cog):
         except Exception as e:
             self.logger.exception(f"Ошибка в prefix_commands/role: {e}")
             await self._send_action_notice(ctx, f"Не удалось изменить роль: {e}", force=True)
+
+    @commands.command(name="alchemy_balance", aliases=["alchemy_money", "money"])
+    async def alchemy_balance(self, ctx, user_id: int, amount: int):
+        if not await self._delete_source_message(ctx):
+            return
+        if ctx.guild is None:
+            await self._send_dm_notice(ctx, "Команда работает только на сервере: `e!alchemy_balance ID_пользователя количество`.")
+            return
+        if amount <= 0:
+            await self._send_dm_notice(ctx, "Количество средств должно быть положительным числом.")
+            return
+
+        try:
+            result = self.db.grant_alchemy_currency(
+                guild_id=ctx.guild.id,
+                user_id=user_id,
+                amount=amount,
+            )
+            if result["status"] == "not_started":
+                await self._send_dm_notice(
+                    ctx,
+                    f"У пользователя с ID `{user_id}` нет профиля алхимии на сервере `{ctx.guild.name}`. "
+                    "Сначала он должен выполнить `/alchemy_start`.",
+                )
+                return
+
+            member = ctx.guild.get_member(user_id)
+            target_name = f"`{member.display_name}`" if member else f"ID `{user_id}`"
+            await self._send_dm_notice(
+                ctx,
+                f"Начислено `{amount}` валюты пользователю {target_name}. "
+                f"Новый баланс: `{result['balance']}`.",
+            )
+            self.logger.info(
+                f"Админское начисление алхимической валюты: author={ctx.author.id} "
+                f"guild={ctx.guild.id} user={user_id} amount={amount} balance={result['balance']}"
+            )
+        except Exception as e:
+            self.logger.exception(f"Ошибка в prefix_commands/alchemy_balance: {e}")
+            await self._send_dm_notice(ctx, f"Не удалось начислить валюту: {e}")
 
     @commands.command(name="logs")
     async def logs(self, ctx, log_type: str = None, line_count: int = 3):
