@@ -21,6 +21,7 @@ BASE_ALCHEMY_ELEMENTS = [
 ]
 INVENTORY_PAGE_SIZE = 20
 RECIPES_PAGE_SIZE = 12
+ALCHEMY_FORBIDDEN_CHAIN_DEPTH = 5
 
 
 def _read_positive_int_env(name: str, default: int) -> int:
@@ -340,7 +341,17 @@ class AlchemyCommands(commands.Cog):
                 return
 
             try:
-                generated = await self.generator.generate_result(left_element, right_element)
+                related_elements = self.db.get_related_alchemy_element_names(
+                    [left_element, right_element],
+                    max_depth=ALCHEMY_FORBIDDEN_CHAIN_DEPTH,
+                )
+                known_elements = self.db.get_known_alchemy_element_names()
+                generated = await self.generator.generate_result(
+                    left_element,
+                    right_element,
+                    existing_results=related_elements,
+                    unavailable_results=known_elements,
+                )
             except (AlchemyConfigError, AlchemyGenerationError, Exception) as error:
                 refund = self.db.refund_alchemy_currency(
                     guild_id=inter.guild.id,

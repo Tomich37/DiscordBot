@@ -234,6 +234,52 @@ class Database:
             missing = [element_name for element_name in element_names if element_name not in owned_names]
             return {"status": "ok", "missing": missing}
 
+    def get_related_alchemy_element_names(self, element_names: list[str], max_depth: int = 5) -> tuple[str, ...]:
+        with Session(autoflush=False, bind=engine) as db:
+            forbidden_names = []
+            visited_names = set()
+            queue = [(element_name, 0) for element_name in element_names]
+
+            while queue:
+                element_name, depth = queue.pop(0)
+                if element_name in visited_names:
+                    continue
+
+                visited_names.add(element_name)
+                forbidden_names.append(element_name)
+
+                if depth >= max_depth:
+                    continue
+
+                parent_recipes = (
+                    db.query(AlchemyRecipe.left_element, AlchemyRecipe.right_element)
+                    .join(AlchemyElement, AlchemyElement.id == AlchemyRecipe.result_element_id)
+                    .filter(
+                        AlchemyRecipe.guild_id == self.GLOBAL_ALCHEMY_GUILD_ID,
+                        AlchemyElement.guild_id == self.GLOBAL_ALCHEMY_GUILD_ID,
+                        AlchemyElement.normalized_name == element_name,
+                    )
+                    .all()
+                )
+
+                # Поднимаемся по цепочке происхождения элемента до заданной глубины.
+                for left_element, right_element in parent_recipes:
+                    if left_element not in visited_names:
+                        queue.append((left_element, depth + 1))
+                    if right_element not in visited_names:
+                        queue.append((right_element, depth + 1))
+
+            return tuple(forbidden_names)
+
+    def get_known_alchemy_element_names(self) -> tuple[str, ...]:
+        with Session(autoflush=False, bind=engine) as db:
+            rows = (
+                db.query(AlchemyElement.normalized_name)
+                .filter_by(guild_id=self.GLOBAL_ALCHEMY_GUILD_ID)
+                .all()
+            )
+            return tuple(row[0] for row in rows)
+
     def claim_alchemy_daily(self, guild_id: int, user_id: int, reward: int, today: date) -> dict:
         with Session(autoflush=False, bind=engine) as db:
             player = self._get_alchemy_player(db, guild_id, user_id)
@@ -283,6 +329,18 @@ class Database:
             self._add_alchemy_transaction(db, player, amount, reason)
             db.commit()
             return {"status": "refunded", "balance": player.balance}
+
+    def grant_alchemy_currency(self, guild_id: int, user_id: int, amount: int, reason: str = "admin_grant") -> dict:
+        with Session(autoflush=False, bind=engine) as db:
+            player = self._get_alchemy_player(db, guild_id, user_id)
+            if not player:
+                return {"status": "not_started"}
+
+            player.balance += amount
+            player.updated_at = datetime.utcnow()
+            self._add_alchemy_transaction(db, player, amount, reason)
+            db.commit()
+            return {"status": "granted", "balance": player.balance}
 
     def get_alchemy_recipe(self, guild_id: int, left_element: str, right_element: str) -> dict | None:
         with Session(autoflush=False, bind=engine) as db:
