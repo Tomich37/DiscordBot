@@ -325,7 +325,11 @@ class SlashCommands(commands.Cog):
     @staticmethod
     def _format_alchemy_stats(stats: dict) -> str:
         if not stats.get("exists"):
-            return "Профиль алхимика ещё не создан. Используйте `/alchemy start`."
+            return (
+                "**Баланс:** `0`\n"
+                "**Элементов:** `0`\n"
+                "**Первые открытия:** `0`"
+            )
 
         return (
             f"**Баланс:** `{stats['balance']}`\n"
@@ -606,7 +610,7 @@ class SlashCommands(commands.Cog):
             inline=False,
         )
         embed.add_field(
-            name="Алхимия",
+            name="Валюта и алхимия",
             value=self._format_alchemy_stats(alchemy_stats),
             inline=False,
         )
@@ -896,7 +900,7 @@ class SlashCommands(commands.Cog):
         human_count = guild.member_count - bot_count if guild.member_count else 0
         return human_count, bot_count
 
-    def _build_serverinfo_embed(self, guild: disnake.Guild) -> disnake.Embed:
+    def _build_server_info_embed(self, guild: disnake.Guild) -> disnake.Embed:
         human_count, bot_count = self._count_humans_and_bots(guild)
         text_channels = len(guild.text_channels)
         voice_channels = len(guild.voice_channels)
@@ -970,24 +974,24 @@ class SlashCommands(commands.Cog):
         return embed
 
     @commands.slash_command(
-        name="serverinfo",
+        name="server_info",
         description="Показать красивый профиль сервера",
         dm_permission=False,
     )
-    async def serverinfo(self, inter: disnake.GuildCommandInteraction):
+    async def server_info(self, inter: disnake.GuildCommandInteraction):
         """
         Профиль текущего сервера.
         """
         try:
-            embed = self._build_serverinfo_embed(inter.guild)
+            embed = self._build_server_info_embed(inter.guild)
             await inter.response.send_message(embed=embed)
         except Exception as e:
             await inter.response.send_message(
                 "Не получилось собрать профиль сервера.",
                 ephemeral=True,
             )
-            self.logger.exception(f"Ошибка в commands/serverinfo: {e}")
-            print(f"Ошибка в commands/serverinfo: {e}")
+            self.logger.exception(f"Ошибка в commands/server_info: {e}")
+            print(f"Ошибка в commands/server_info: {e}")
 
     roleMenegment = commands.option_enum({"Назначить роль": "add", "Снять роль": "take"})
 

@@ -20,6 +20,7 @@ BASE_ALCHEMY_ELEMENTS = [
     ("воздух", "воздух"),
 ]
 INVENTORY_PAGE_SIZE = 20
+RECIPES_PAGE_SIZE = 12
 
 
 def _read_positive_int_env(name: str, default: int) -> int:
@@ -32,6 +33,134 @@ def _read_positive_int_env(name: str, default: int) -> int:
     return value if value > 0 else default
 
 
+def _read_daily_reward(default: int) -> int:
+    import os
+
+    return _read_positive_int_env("DAILY_REWARD", _read_positive_int_env("ALCHEMY_DAILY_REWARD", default))
+
+
+def _build_inventory_embed(inventory: dict) -> disnake.Embed:
+    items = ", ".join(inventory["items"]) if inventory["items"] else "Коллекция пока пустая."
+    embed = disnake.Embed(
+        title="Алхимия: коллекция",
+        description=items,
+        color=0x58A65C,
+    )
+    embed.set_footer(
+        text=(
+            f"Страница {inventory['page'] + 1}/{inventory['total_pages']} "
+            f"| элементов: {inventory['total_count']}"
+        )
+    )
+    return embed
+
+
+def _build_recipes_embed(guild: disnake.Guild, recipes: dict) -> disnake.Embed:
+    lines = []
+    for index, recipe in enumerate(recipes["items"], start=recipes["page"] * RECIPES_PAGE_SIZE + 1):
+        discoverer = guild.get_member(recipe["first_discoverer_id"])
+        discoverer_name = discoverer.display_name if discoverer else f"ID {recipe['first_discoverer_id']}"
+        lines.append(
+            f"**{index}.** `{recipe['left_element']}` + `{recipe['right_element']}` "
+            f"= **{recipe['result_display']}**\nОткрыл: {discoverer_name}"
+        )
+
+    embed = disnake.Embed(
+        title="Алхимия: открытые рецепты",
+        description="\n\n".join(lines),
+        color=0x58A65C,
+    )
+    embed.set_footer(
+        text=(
+            f"Страница {recipes['page'] + 1}/{recipes['total_pages']} "
+            f"| рецептов: {recipes['total_count']}"
+        )
+    )
+    return embed
+
+
+class AlchemyPaginationView(disnake.ui.View):
+    def __init__(self, author_id: int, total_pages: int) -> None:
+        self.author_id = author_id
+        self.current_page = 0
+        self.total_pages = total_pages
+        super().__init__(timeout=180)
+        self._sync_buttons()
+
+    def _sync_buttons(self) -> None:
+        has_multiple_pages = self.total_pages > 1
+        self.previous_page.disabled = not has_multiple_pages or self.current_page == 0
+        self.next_page.disabled = not has_multiple_pages or self.current_page >= self.total_pages - 1
+
+    async def interaction_check(self, interaction: disnake.MessageInteraction) -> bool:
+        if interaction.author.id == self.author_id:
+            return True
+
+        await interaction.response.send_message("Эти кнопки относятся к чужому списку.", ephemeral=True)
+        return False
+
+    async def refresh_page(self, interaction: disnake.MessageInteraction) -> None:
+        raise NotImplementedError
+
+    @disnake.ui.button(label="Назад", style=disnake.ButtonStyle.secondary)
+    async def previous_page(
+        self,
+        button: disnake.ui.Button,
+        interaction: disnake.MessageInteraction,
+    ) -> None:
+        if self.current_page > 0:
+            self.current_page -= 1
+        await self.refresh_page(interaction)
+
+    @disnake.ui.button(label="Вперёд", style=disnake.ButtonStyle.primary)
+    async def next_page(
+        self,
+        button: disnake.ui.Button,
+        interaction: disnake.MessageInteraction,
+    ) -> None:
+        if self.current_page < self.total_pages - 1:
+            self.current_page += 1
+        await self.refresh_page(interaction)
+
+
+class AlchemyInventoryView(AlchemyPaginationView):
+    def __init__(self, db: Database, guild_id: int, user_id: int, total_pages: int) -> None:
+        self.db = db
+        self.guild_id = guild_id
+        self.user_id = user_id
+        super().__init__(author_id=user_id, total_pages=total_pages)
+
+    async def refresh_page(self, interaction: disnake.MessageInteraction) -> None:
+        inventory = self.db.get_alchemy_inventory_page(
+            guild_id=self.guild_id,
+            user_id=self.user_id,
+            page=self.current_page,
+            page_size=INVENTORY_PAGE_SIZE,
+        )
+        self.current_page = inventory["page"]
+        self.total_pages = inventory["total_pages"]
+        self._sync_buttons()
+        await interaction.response.edit_message(embed=_build_inventory_embed(inventory), view=self)
+
+
+class AlchemyRecipesView(AlchemyPaginationView):
+    def __init__(self, db: Database, guild: disnake.Guild, author_id: int, total_pages: int) -> None:
+        self.db = db
+        self.guild = guild
+        super().__init__(author_id=author_id, total_pages=total_pages)
+
+    async def refresh_page(self, interaction: disnake.MessageInteraction) -> None:
+        recipes = self.db.get_discovered_alchemy_recipes_page(
+            guild_id=self.guild.id,
+            page=self.current_page,
+            page_size=RECIPES_PAGE_SIZE,
+        )
+        self.current_page = recipes["page"]
+        self.total_pages = recipes["total_pages"]
+        self._sync_buttons()
+        await interaction.response.edit_message(embed=_build_recipes_embed(self.guild, recipes), view=self)
+
+
 class AlchemyCommands(commands.Cog):
     def __init__(self, bot, logger):
         self.bot = bot
@@ -39,18 +168,14 @@ class AlchemyCommands(commands.Cog):
         self.db = Database()
         self.generator = AlchemyGenerator()
         self.start_balance = _read_positive_int_env("ALCHEMY_START_BALANCE", 50)
-        self.daily_reward = _read_positive_int_env("ALCHEMY_DAILY_REWARD", 25)
+        self.daily_reward = _read_daily_reward(25)
         self.combine_cost = _read_positive_int_env("ALCHEMY_COMBINE_COST", 5)
 
     @commands.slash_command(
-        name="alchemy",
-        description="Мини-игра Алхимия",
+        name="alchemy_start",
+        description="Начать игру в Алхимию",
         dm_permission=False,
     )
-    async def alchemy(self, inter: disnake.GuildCommandInteraction):
-        pass
-
-    @alchemy.sub_command(name="start", description="Начать игру в Алхимию")
     async def alchemy_start(self, inter: disnake.GuildCommandInteraction):
         try:
             result = self.db.start_alchemy_player(
@@ -76,19 +201,20 @@ class AlchemyCommands(commands.Cog):
             self.logger.exception(f"Ошибка в commands/alchemy_start: {error}")
             await inter.response.send_message("Не получилось создать профиль алхимика.", ephemeral=True)
 
-    @alchemy.sub_command(name="daily", description="Получить ежедневную валюту для Алхимии")
-    async def alchemy_daily(self, inter: disnake.GuildCommandInteraction):
+    @commands.slash_command(
+        name="daily",
+        description="Получить ежедневную валюту",
+        dm_permission=False,
+    )
+    async def daily(self, inter: disnake.GuildCommandInteraction):
         try:
-            result = self.db.claim_alchemy_daily(
+            result = self.db.claim_daily_reward(
                 guild_id=inter.guild.id,
                 user_id=inter.author.id,
                 reward=self.daily_reward,
                 today=date.today(),
             )
 
-            if result["status"] == "not_started":
-                await inter.response.send_message("Сначала начните игру командой `/alchemy start`.", ephemeral=True)
-                return
             if result["status"] == "already_claimed":
                 tomorrow = date.today() + timedelta(days=1)
                 await inter.response.send_message(
@@ -102,10 +228,14 @@ class AlchemyCommands(commands.Cog):
                 f"Вы получили `{result['reward']}` валюты. Баланс: `{result['balance']}`."
             )
         except Exception as error:
-            self.logger.exception(f"Ошибка в commands/alchemy_daily: {error}")
+            self.logger.exception(f"Ошибка в commands/daily: {error}")
             await inter.response.send_message("Не получилось выдать дейлик.", ephemeral=True)
 
-    @alchemy.sub_command(name="combine", description="Соединить два элемента")
+    @commands.slash_command(
+        name="alchemy_combine",
+        description="Соединить два элемента",
+        dm_permission=False,
+    )
     async def alchemy_combine(
         self,
         inter: disnake.GuildCommandInteraction,
@@ -129,7 +259,7 @@ class AlchemyCommands(commands.Cog):
                 element_names=list({left_element, right_element}),
             )
             if inventory_check["status"] == "not_started":
-                await inter.followup.send("Сначала начните игру командой `/alchemy start`.", ephemeral=True)
+                await inter.followup.send("Сначала начните игру командой `/alchemy_start`.", ephemeral=True)
                 return
             if inventory_check["missing"]:
                 missing_text = ", ".join(f"`{element}`" for element in inventory_check["missing"])
@@ -146,12 +276,12 @@ class AlchemyCommands(commands.Cog):
                 amount=self.combine_cost,
             )
             if spend_result["status"] == "not_started":
-                await inter.followup.send("Сначала начните игру командой `/alchemy start`.", ephemeral=True)
+                await inter.followup.send("Сначала начните игру командой `/alchemy_start`.", ephemeral=True)
                 return
             if spend_result["status"] == "not_enough":
                 await inter.followup.send(
                     f"Не хватает валюты. Нужно `{self.combine_cost}`, у вас `{spend_result['balance']}`. "
-                    "Заберите дейлик командой `/alchemy daily`.",
+                    "Заберите дейлик командой `/daily`.",
                     ephemeral=True,
                 )
                 return
@@ -239,91 +369,74 @@ class AlchemyCommands(commands.Cog):
             else:
                 await inter.response.send_message("Произошла ошибка при сочетании элементов.", ephemeral=True)
 
-    @alchemy.sub_command(name="inventory", description="Показать вашу коллекцию элементов")
+    @commands.slash_command(
+        name="alchemy_inventory",
+        description="Показать вашу коллекцию элементов",
+        dm_permission=False,
+    )
     async def alchemy_inventory(
         self,
         inter: disnake.GuildCommandInteraction,
-        page: commands.Range[int, 1, 100] = 1,
     ):
         try:
             inventory = self.db.get_alchemy_inventory_page(
                 guild_id=inter.guild.id,
                 user_id=inter.author.id,
-                page=page - 1,
+                page=0,
                 page_size=INVENTORY_PAGE_SIZE,
             )
             if inventory["status"] == "not_started":
-                await inter.response.send_message("Сначала начните игру командой `/alchemy start`.", ephemeral=True)
+                await inter.response.send_message("Сначала начните игру командой `/alchemy_start`.", ephemeral=True)
                 return
 
-            items = ", ".join(inventory["items"]) if inventory["items"] else "Коллекция пока пустая."
-            embed = disnake.Embed(
-                title="Алхимия: коллекция",
-                description=items,
-                color=0x58A65C,
+            view = AlchemyInventoryView(
+                db=self.db,
+                guild_id=inter.guild.id,
+                user_id=inter.author.id,
+                total_pages=inventory["total_pages"],
             )
-            embed.set_footer(
-                text=(
-                    f"Страница {inventory['page'] + 1}/{inventory['total_pages']} "
-                    f"| элементов: {inventory['total_count']}"
-                )
+            await inter.response.send_message(
+                embed=_build_inventory_embed(inventory),
+                view=view,
+                ephemeral=True,
             )
-            await inter.response.send_message(embed=embed, ephemeral=True)
         except Exception as error:
             self.logger.exception(f"Ошибка в commands/alchemy_inventory: {error}")
             await inter.response.send_message("Не получилось показать коллекцию.", ephemeral=True)
 
-    @alchemy.sub_command(name="profile", description="Показать профиль алхимика")
-    async def alchemy_profile(
+    @commands.slash_command(
+        name="alchemy_recipes",
+        description="Показать открытые рецепты сервера",
+        dm_permission=False,
+    )
+    async def alchemy_recipes(
         self,
         inter: disnake.GuildCommandInteraction,
-        member: disnake.Member = None,
     ):
         try:
-            target_member = member or inter.author
-            profile = self.db.get_alchemy_profile(inter.guild.id, target_member.id)
-            if not profile["exists"]:
-                await inter.response.send_message("У этого пользователя ещё нет профиля алхимика.", ephemeral=True)
+            recipes = self.db.get_discovered_alchemy_recipes_page(
+                guild_id=inter.guild.id,
+                page=0,
+                page_size=RECIPES_PAGE_SIZE,
+            )
+            if not recipes["items"]:
+                await inter.response.send_message("На этом сервере пока нет открытых рецептов.", ephemeral=True)
                 return
 
-            embed = disnake.Embed(
-                title=f"Алхимия: {target_member.display_name}",
-                color=0x58A65C,
+            view = AlchemyRecipesView(
+                db=self.db,
+                guild=inter.guild,
+                author_id=inter.author.id,
+                total_pages=recipes["total_pages"],
             )
-            embed.add_field(name="Баланс", value=f"`{profile['balance']}`", inline=True)
-            embed.add_field(name="Элементов", value=f"`{profile['element_count']}`", inline=True)
-            embed.add_field(name="Первые открытия", value=f"`{profile['first_discovery_count']}`", inline=True)
-            await inter.response.send_message(embed=embed)
-        except Exception as error:
-            self.logger.exception(f"Ошибка в commands/alchemy_profile: {error}")
-            await inter.response.send_message("Не получилось показать профиль алхимика.", ephemeral=True)
-
-    @alchemy.sub_command(name="top", description="Топ алхимиков сервера")
-    async def alchemy_top(self, inter: disnake.GuildCommandInteraction):
-        try:
-            rows = self.db.get_alchemy_top(inter.guild.id, limit=10)
-            if not rows:
-                await inter.response.send_message("В топе алхимиков пока никого нет.", ephemeral=True)
-                return
-
-            lines = []
-            for index, row in enumerate(rows, start=1):
-                member = inter.guild.get_member(row["user_id"])
-                name = member.display_name if member else f"ID {row['user_id']}"
-                lines.append(
-                    f"**{index}.** {name} — открытий: `{row['first_discovery_count']}`, "
-                    f"элементов: `{row['element_count']}`, баланс: `{row['balance']}`"
-                )
-
-            embed = disnake.Embed(
-                title="Топ алхимиков",
-                description="\n".join(lines),
-                color=0x58A65C,
+            await inter.response.send_message(
+                embed=_build_recipes_embed(inter.guild, recipes),
+                view=view,
+                ephemeral=True,
             )
-            await inter.response.send_message(embed=embed)
         except Exception as error:
-            self.logger.exception(f"Ошибка в commands/alchemy_top: {error}")
-            await inter.response.send_message("Не получилось собрать топ алхимиков.", ephemeral=True)
+            self.logger.exception(f"Ошибка в commands/alchemy_recipes: {error}")
+            await inter.response.send_message("Не получилось показать рецепты.", ephemeral=True)
 
 
 def setup(bot, logger):

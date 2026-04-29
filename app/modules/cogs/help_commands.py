@@ -126,8 +126,8 @@ COMMANDS_INFO = {
         ],
         "admin_only": False,
     },
-    "serverinfo": {
-        "title": "/serverinfo",
+    "server_info": {
+        "title": "/server_info",
         "category": "Утилиты",
         "kind": "Слэш-команда",
         "short": "Показывает красивый профиль текущего сервера с оформлением, участниками, каналами, бустами и функциями.",
