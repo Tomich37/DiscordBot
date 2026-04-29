@@ -25,6 +25,42 @@ def _read_positive_int_env(name: str, default: int) -> int:
 GIGACHAT_MAX_CONCURRENT_REQUESTS = _read_positive_int_env("GIGACHAT_MAX_CONCURRENT_REQUESTS", 1)
 _GIGACHAT_REQUEST_SEMAPHORE = asyncio.Semaphore(GIGACHAT_MAX_CONCURRENT_REQUESTS)
 GIGACHAT_GENERATION_ATTEMPTS = _read_positive_int_env("GIGACHAT_GENERATION_ATTEMPTS", 3)
+ALCHEMY_RESULT_MAX_LENGTH = 80
+ALCHEMY_RESULT_MAX_WORDS = 3
+ALCHEMY_ROOT_MIN_LENGTH = 3
+
+RUSSIAN_WORD_SUFFIXES = (
+    "иями",
+    "ями",
+    "ами",
+    "ого",
+    "ему",
+    "ыми",
+    "ими",
+    "ая",
+    "яя",
+    "ое",
+    "ее",
+    "ый",
+    "ий",
+    "ой",
+    "ую",
+    "юю",
+    "ом",
+    "ем",
+    "ах",
+    "ях",
+    "ов",
+    "ев",
+    "ей",
+    "ы",
+    "и",
+    "а",
+    "я",
+    "о",
+    "е",
+    "ь",
+)
 
 
 class AlchemyConfigError(Exception):
@@ -49,14 +85,48 @@ def validate_alchemy_word(value: str) -> str:
     normalized = normalize_alchemy_word(value)
     if not normalized:
         raise ValueError("Результат пустой.")
-    if len(normalized) > 40:
+    if len(normalized) > ALCHEMY_RESULT_MAX_LENGTH:
         raise ValueError("Результат слишком длинный.")
-    if " " in normalized:
-        raise ValueError("Результат должен быть одним словом.")
-    if not re.fullmatch(r"[а-яё-]+", normalized):
-        raise ValueError("Результат должен быть русским словом.")
+    if len(normalized.split()) > ALCHEMY_RESULT_MAX_WORDS:
+        raise ValueError("Результат должен быть коротким названием до трёх слов.")
+    if not re.fullmatch(r"[а-яё -]+", normalized):
+        raise ValueError("Результат должен быть русским словом или коротким русским словосочетанием.")
 
     return normalized
+
+
+def _extract_alchemy_tokens(value: str) -> tuple[str, ...]:
+    return tuple(token for token in re.split(r"[^а-яё]+", normalize_alchemy_word(value)) if token)
+
+
+def _alchemy_root(token: str) -> str:
+    for suffix in RUSSIAN_WORD_SUFFIXES:
+        if token.endswith(suffix) and len(token) - len(suffix) >= ALCHEMY_ROOT_MIN_LENGTH:
+            return token[: -len(suffix)]
+    return token
+
+
+def _collect_alchemy_roots(values: tuple[str, ...]) -> tuple[str, ...]:
+    roots = []
+    for value in values:
+        for token in _extract_alchemy_tokens(value):
+            root = _alchemy_root(token)
+            if len(root) >= ALCHEMY_ROOT_MIN_LENGTH and root not in roots:
+                roots.append(root)
+    return tuple(roots)
+
+
+def _has_forbidden_root(result: str, source_values: tuple[str, ...]) -> bool:
+    result_compact = re.sub(r"[^а-яё]+", "", normalize_alchemy_word(result))
+    result_tokens = _extract_alchemy_tokens(result)
+
+    for root in _collect_alchemy_roots(source_values):
+        if root in result_compact:
+            return True
+        if any(root in _alchemy_root(token) or _alchemy_root(token) in root for token in result_tokens):
+            return True
+
+    return False
 
 
 def validate_alchemy_result(value: str, left_word: str, right_word: str) -> str:
@@ -167,9 +237,14 @@ class AlchemyGenerator:
 
         system_prompt = (
             "Ты движок мини-игры 'Алхимия' для русскоязычного Discord-сервера. "
-            "По двум элементам придумай один логичный результат, которого ещё нет в игре. "
-            "Верни только JSON вида {\"result\":\"слово\"}. Значение result должно быть одним русским существительным, "
-            "без пояснений, эмодзи, кавычек внутри слова и лишних слов. "
+            "По двум элементам придумай один новый, интересный и неожиданный результат, которого ещё нет в игре. "
+            "Можно отходить от прямой физики и использовать фантазию, мифы, технологии, быт, культуру, существ, механизмы и явления. "
+            "Хороший стиль: грязь + жизнь = голем, электричество + металл = автомобиль, огонь + птица = феникс. "
+            "Плохой стиль: склеивать части исходных слов, делать стихийные повторы или добавлять суффиксы вроде -сфера, -грунт, -зем. "
+            "Не используй однокоренные слова с исходными элементами и запрещёнными вариантами. "
+            "Верни только JSON вида {\"result\":\"название\"}. Значение result должно быть русским существительным "
+            "или коротким русским словосочетанием до трёх слов, "
+            "без пояснений, эмодзи, кавычек внутри названия и лишних слов. "
             "Результат не должен совпадать ни с первым, ни со вторым исходным элементом. "
             "Результат обязан быть новым: не используй ни одно слово из списка запрещённых вариантов."
         )
@@ -193,7 +268,7 @@ class AlchemyGenerator:
                     "properties": {
                         "result": {
                             "type": "string",
-                            "description": "Одно русское слово - результат сочетания элементов.",
+                            "description": "Русское слово или короткое словосочетание - результат сочетания элементов.",
                         }
                     },
                     "required": ["result"],
@@ -258,6 +333,10 @@ class AlchemyGenerator:
             if result in unavailable_results_set:
                 rejected_results = rejected_results + (result,)
                 last_error = AlchemyGenerationError(f"Результат уже существует в игре: {result}.")
+                continue
+            if _has_forbidden_root(result, rejected_results):
+                rejected_results = rejected_results + (result,)
+                last_error = AlchemyGenerationError(f"Результат однокоренной с уже связанными элементами: {result}.")
                 continue
 
             return {
