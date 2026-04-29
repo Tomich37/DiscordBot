@@ -171,7 +171,7 @@ class AlchemyCommands(commands.Cog):
                 if discovery_result["status"] == "discovered_on_guild":
                     await inter.followup.send(
                         f"`{left_element}` + `{right_element}` = **{known_recipe['result_display']}**.\n"
-                        "Рецепт уже был в общей базе, поэтому OpenAI не вызывался. "
+                        "Рецепт уже был в общей базе, поэтому GigaChat не вызывался. "
                         f"Но на этом сервере это новое открытие, {inter.author.mention} стал первооткрывателем.\n"
                         f"{inventory_text}\n"
                         f"Баланс: `{spend_result['balance']}`."
@@ -196,7 +196,7 @@ class AlchemyCommands(commands.Cog):
                 )
                 self.logger.exception(f"Ошибка генерации алхимии: {error}")
                 await inter.followup.send(
-                    "Не получилось получить результат от OpenAI. Валюта возвращена. "
+                    "Не получилось получить результат от GigaChat. Валюта возвращена. "
                     f"Баланс: `{refund.get('balance', spend_result['balance'])}`.",
                     ephemeral=True,
                 )

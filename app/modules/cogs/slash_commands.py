@@ -21,6 +21,12 @@ FOOTER_TEXT = "Made by the_usual_god"
 LEADERBOARD_PAGE_SIZE = 15
 
 
+async def send_interaction_message(inter, *args, **kwargs):
+    if inter.response.is_done():
+        return await inter.followup.send(*args, **kwargs)
+    return await inter.response.send_message(*args, **kwargs)
+
+
 class LeaderboardPaginationView(disnake.ui.View):
     def __init__(self, author_id: int, pages: list[disnake.Embed]) -> None:
         self.author_id = author_id
@@ -108,7 +114,7 @@ class SlashCommands(commands.Cog):
         description="Понг",
     )
     async def ping(self, inter):
-        await inter.response.send_message(f"Понг! {round(self.bot.latency * 1000)}мс")
+        await send_interaction_message(inter, f"Понг! {round(self.bot.latency * 1000)}мс")
 
     @staticmethod
     def _format_timestamp(value) -> str:

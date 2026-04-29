@@ -1,5 +1,5 @@
 disnake
-openai
+gigachat
 configparser
 sqlalchemy
 psycopg2

@@ -1,15 +1,29 @@
 import json
 import os
 import re
+import asyncio
 
 from dotenv import load_dotenv
-from openai import AsyncOpenAI
 
 
 load_dotenv()
 
 
-ALLOWED_ALCHEMY_MODELS = {"gpt-5-nano", "gpt-5.4-nano", "gpt-5.4-mini"}
+DEFAULT_GIGACHAT_MODEL = "GigaChat"
+
+
+def _read_positive_int_env(name: str, default: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+# GigaChat в текущем тарифе принимает один одновременный запрос, поэтому
+# все генерации рецептов проходят через общий семафор и ждут своей очереди.
+GIGACHAT_MAX_CONCURRENT_REQUESTS = _read_positive_int_env("GIGACHAT_MAX_CONCURRENT_REQUESTS", 1)
+_GIGACHAT_REQUEST_SEMAPHORE = asyncio.Semaphore(GIGACHAT_MAX_CONCURRENT_REQUESTS)
 
 
 class AlchemyConfigError(Exception):
@@ -45,116 +59,153 @@ def validate_alchemy_word(value: str) -> str:
 
 
 def _extract_response_text(response) -> str:
-    output_text = getattr(response, "output_text", None)
-    if output_text:
-        return output_text
+    choices = getattr(response, "choices", []) or []
+    if not choices:
+        return ""
 
-    parts = []
-    for output_item in getattr(response, "output", []) or []:
-        for content_item in getattr(output_item, "content", []) or []:
-            text = getattr(content_item, "text", None)
-            if text:
-                parts.append(text)
-            elif isinstance(content_item, dict) and content_item.get("text"):
-                parts.append(content_item["text"])
+    message = getattr(choices[0], "message", None)
+    if not message and isinstance(choices[0], dict):
+        message = choices[0].get("message")
 
-    return "".join(parts).strip()
+    if isinstance(message, dict):
+        return (message.get("content") or "").strip()
+
+    return (getattr(message, "content", "") or "").strip()
+
+
+def _extract_json_payload(text: str) -> dict:
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\s*```$", "", cleaned)
+
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        start = cleaned.find("{")
+        end = cleaned.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            raise
+        return json.loads(cleaned[start : end + 1])
+
+
+def _extract_plain_result(text: str) -> str:
+    return text.strip().strip("\"'`«»").rstrip(".").strip()
 
 
 def _describe_empty_response(response) -> str:
-    status = getattr(response, "status", None)
-    incomplete_details = getattr(response, "incomplete_details", None)
-    output_types = [
-        getattr(output_item, "type", type(output_item).__name__)
-        for output_item in getattr(response, "output", []) or []
-    ]
-
     details = []
-    if status:
-        details.append(f"status={status}")
-    if incomplete_details:
-        details.append(f"incomplete_details={incomplete_details}")
-    if output_types:
-        details.append(f"output_types={output_types}")
+    model = getattr(response, "model", None)
+    usage = getattr(response, "usage", None)
+    finish_reason = None
+
+    choices = getattr(response, "choices", []) or []
+    if choices:
+        finish_reason = getattr(choices[0], "finish_reason", None)
+        if finish_reason is None and isinstance(choices[0], dict):
+            finish_reason = choices[0].get("finish_reason")
+
+    if model:
+        details.append(f"model={model}")
+    if finish_reason:
+        details.append(f"finish_reason={finish_reason}")
+    if usage:
+        details.append(f"usage={usage}")
 
     return ", ".join(details) if details else "без деталей ответа"
 
 
 class AlchemyGenerator:
     def __init__(self):
-        self.model = os.getenv("ALCHEMY_MODEL", "gpt-5-nano").strip()
+        self.model = os.getenv("GIGACHAT_MODEL", DEFAULT_GIGACHAT_MODEL).strip() or DEFAULT_GIGACHAT_MODEL
         self.config_error = None
         self.client = None
+        self.chat_payload_class = None
+        self.message_class = None
+        self.role_class = None
 
-        api_key = os.getenv("OPENAI_API_KEY")
+        api_key = os.getenv("GIGACHAT_API_KEY")
         if not api_key:
-            self.config_error = "OPENAI_API_KEY не задан в .env."
+            self.config_error = "GIGACHAT_API_KEY не задан в .env."
             return
 
-        if self.model not in ALLOWED_ALCHEMY_MODELS:
-            allowed_models = ", ".join(sorted(ALLOWED_ALCHEMY_MODELS))
-            self.config_error = f"ALCHEMY_MODEL должен быть одним из: {allowed_models}."
+        try:
+            from gigachat import GigaChat
+            from gigachat.models import Chat, Messages, MessagesRole
+        except ImportError:
+            self.config_error = "Пакет gigachat не установлен. Установите зависимости из requirements.txt."
             return
 
-        self.client = AsyncOpenAI(api_key=api_key)
+        verify_ssl_certs = os.getenv("GIGACHAT_VERIFY_SSL_CERTS", "false").lower() not in {"0", "false", "no", "off"}
+        self.client = GigaChat(credentials=api_key, verify_ssl_certs=verify_ssl_certs)
+        self.chat_payload_class = Chat
+        self.message_class = Messages
+        self.role_class = MessagesRole
 
     def ensure_ready(self):
         if self.config_error:
             raise AlchemyConfigError(self.config_error)
         if not self.client:
-            raise AlchemyConfigError("OpenAI-клиент не инициализирован.")
+            raise AlchemyConfigError("GigaChat-клиент не инициализирован.")
+
+    def _build_prompt(self, left_word: str, right_word: str):
+        system_prompt = (
+            "Ты движок мини-игры 'Алхимия' для русскоязычного Discord-сервера. "
+            "По двум элементам придумай один логичный результат. "
+            "Верни только JSON вида {\"result\":\"слово\"}. Значение result должно быть одним русским существительным, "
+            "без пояснений, эмодзи, кавычек внутри слова и лишних слов."
+        )
+        user_prompt = (
+            f"Элемент 1: {left_word}\n"
+            f"Элемент 2: {right_word}\n"
+            "Нужен результат сочетания."
+        )
+        return self.chat_payload_class(
+            model=self.model,
+            messages=[
+                self.message_class(role=self.role_class.SYSTEM, content=system_prompt),
+                self.message_class(role=self.role_class.USER, content=user_prompt),
+            ],
+            max_tokens=256,
+            response_format={
+                "type": "json_schema",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "result": {
+                            "type": "string",
+                            "description": "Одно русское слово - результат сочетания элементов.",
+                        }
+                    },
+                    "required": ["result"],
+                    "additionalProperties": False,
+                },
+                "strict": True,
+            },
+        )
+
+    def _request_result(self, left_word: str, right_word: str):
+        return self.client.chat(self._build_prompt(left_word, right_word))
 
     async def generate_result(self, left_word: str, right_word: str) -> dict:
         self.ensure_ready()
 
-        response = await self.client.responses.create(
-            model=self.model,
-            instructions=(
-                "Ты движок мини-игры 'Алхимия' для русскоязычного Discord-сервера. "
-                "По двум элементам придумай один логичный результат. "
-                "Верни только JSON по схеме. Значение result должно быть одним русским существительным, "
-                "без пояснений, эмодзи, кавычек внутри слова и лишних слов."
-            ),
-            input=(
-                f"Элемент 1: {left_word}\n"
-                f"Элемент 2: {right_word}\n"
-                "Нужен результат сочетания."
-            ),
-            max_output_tokens=256,
-            reasoning={"effort": "minimal"},
-            store=False,
-            text={
-                "format": {
-                    "type": "json_schema",
-                    "name": "alchemy_result",
-                    "strict": True,
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "result": {
-                                "type": "string",
-                                "description": "Одно русское слово - результат сочетания элементов.",
-                            }
-                        },
-                        "required": ["result"],
-                        "additionalProperties": False,
-                    },
-                }
-            },
-        )
+        async with _GIGACHAT_REQUEST_SEMAPHORE:
+            response = await asyncio.to_thread(self._request_result, left_word, right_word)
 
         output_text = _extract_response_text(response)
         if not output_text:
             details = _describe_empty_response(response)
-            raise AlchemyGenerationError(f"OpenAI вернул пустой ответ: {details}.")
+            raise AlchemyGenerationError(f"GigaChat вернул пустой ответ: {details}.")
 
         try:
-            payload = json.loads(output_text)
-        except json.JSONDecodeError as error:
-            raise AlchemyGenerationError("OpenAI вернул невалидный JSON.") from error
+            payload = _extract_json_payload(output_text)
+            raw_result = payload.get("result", "")
+        except json.JSONDecodeError:
+            raw_result = _extract_plain_result(output_text)
 
         try:
-            result = validate_alchemy_word(payload.get("result", ""))
+            result = validate_alchemy_word(raw_result)
         except ValueError as error:
             raise AlchemyGenerationError(str(error)) from error
 
