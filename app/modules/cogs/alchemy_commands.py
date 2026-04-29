@@ -326,8 +326,7 @@ class AlchemyCommands(commands.Cog):
                 if discovery_result["status"] == "discovered_on_guild":
                     await inter.followup.send(
                         f"`{left_element}` + `{right_element}` = **{known_recipe['result_display']}**.\n"
-                        "Рецепт уже был в общей базе."
-                        f"Но на этом сервере это новое открытие, {inter.author.mention} стал первооткрывателем.\n"
+                        f"{inter.author.mention} стал первооткрывателем.\n"
                         f"{inventory_text}\n"
                         f"Баланс: `{spend_result['balance']}`."
                     )
@@ -370,7 +369,6 @@ class AlchemyCommands(commands.Cog):
             if discovery["status"] == "discovered_on_guild":
                 await inter.followup.send(
                     f"`{left_element}` + `{right_element}` = **{discovery['result_display']}**.\n"
-                    "Рецепт уже был в общей базе, но на этом сервере открыт впервые. "
                     f"{inter.author.mention} стал первооткрывателем."
                 )
                 return
