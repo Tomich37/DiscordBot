@@ -40,7 +40,16 @@ def _read_daily_reward(default: int) -> int:
 
 
 def _build_inventory_embed(inventory: dict) -> disnake.Embed:
-    items = ", ".join(inventory["items"]) if inventory["items"] else "Коллекция пока пустая."
+    items = "\n".join(
+        f"**{index}.** {item}"
+        for index, item in enumerate(
+            inventory["items"],
+            start=inventory["page"] * INVENTORY_PAGE_SIZE + 1,
+        )
+    )
+    if not items:
+        items = "Коллекция пока пустая."
+
     embed = disnake.Embed(
         title="Алхимия: коллекция",
         description=items,
@@ -232,6 +241,22 @@ class AlchemyCommands(commands.Cog):
             await inter.response.send_message("Не получилось выдать дейлик.", ephemeral=True)
 
     @commands.slash_command(
+        name="balance",
+        description="Показать ваш баланс",
+        dm_permission=False,
+    )
+    async def balance(self, inter: disnake.GuildCommandInteraction):
+        try:
+            profile = self.db.get_alchemy_profile(inter.guild.id, inter.author.id)
+            await inter.response.send_message(
+                f"Ваш баланс: `{profile['balance']}`.",
+                ephemeral=True,
+            )
+        except Exception as error:
+            self.logger.exception(f"Ошибка в commands/balance: {error}")
+            await inter.response.send_message("Не получилось показать баланс.", ephemeral=True)
+
+    @commands.slash_command(
         name="alchemy_combine",
         description="Соединить два элемента",
         dm_permission=False,
@@ -301,7 +326,7 @@ class AlchemyCommands(commands.Cog):
                 if discovery_result["status"] == "discovered_on_guild":
                     await inter.followup.send(
                         f"`{left_element}` + `{right_element}` = **{known_recipe['result_display']}**.\n"
-                        "Рецепт уже был в общей базе, поэтому GigaChat не вызывался. "
+                        "Рецепт уже был в общей базе."
                         f"Но на этом сервере это новое открытие, {inter.author.mention} стал первооткрывателем.\n"
                         f"{inventory_text}\n"
                         f"Баланс: `{spend_result['balance']}`."
