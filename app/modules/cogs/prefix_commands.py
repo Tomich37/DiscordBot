@@ -186,8 +186,7 @@ class PrefixCommands(commands.Cog):
 
     @commands.command(name="alchemy_balance", aliases=["alchemy_money", "money"])
     async def alchemy_balance(self, ctx, user_id: int, amount: int):
-        if not await self._delete_source_message(ctx):
-            return
+        await self._delete_source_message(ctx)
         if ctx.guild is None:
             await self._send_dm_notice(ctx, "Команда работает только на сервере: `e!alchemy_balance ID_пользователя количество`.")
             return
