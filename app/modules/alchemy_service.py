@@ -117,13 +117,17 @@ def _collect_alchemy_roots(values: tuple[str, ...]) -> tuple[str, ...]:
 
 
 def _has_forbidden_root(result: str, source_values: tuple[str, ...]) -> bool:
-    result_compact = re.sub(r"[^а-яё]+", "", normalize_alchemy_word(result))
     result_tokens = _extract_alchemy_tokens(result)
+    if not result_tokens:
+        return False
+
+    result_compact = re.sub(r"[^а-яё]+", "", normalize_alchemy_word(result))
 
     for root in _collect_alchemy_roots(source_values):
-        if root in result_compact:
+        if len(result_tokens) == 1 and root in result_compact:
             return True
-        if any(root in _alchemy_root(token) or _alchemy_root(token) in root for token in result_tokens):
+        result_head_root = _alchemy_root(result_tokens[-1])
+        if root == result_head_root:
             return True
 
     return False
