@@ -81,6 +81,12 @@ def _interaction_name(inter):
     return "неизвестно"
 
 
+async def send_interaction_message(inter, *args, **kwargs):
+    if inter.response.is_done():
+        return await inter.followup.send(*args, **kwargs)
+    return await inter.response.send_message(*args, **kwargs)
+
+
 def _is_mi_user(target) -> bool:
     user = getattr(target, "author", None) or getattr(target, "user", None)
     return bool(MI_USER_ID and user and user.id == MI_USER_ID)
@@ -359,7 +365,8 @@ class Bot(commands.Bot):
                 f"Недостаточно прав для команды /{_interaction_name(inter)}: "
                 f"{_format_user(inter.author)} | требуется: {missing_perms}"
             )
-            await inter.response.send_message(
+            await send_interaction_message(
+                inter,
                 f"Недостаточно прав! Требуются: {missing_perms}",
                 ephemeral=True
             )

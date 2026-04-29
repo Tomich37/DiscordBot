@@ -15,7 +15,7 @@ BOT_ICON_URL = (
 )
 FOOTER_TEXT = "Made by the_usual_god"
 HELP_COMMANDS_PER_PAGE = 10
-CATEGORY_ORDER = ("Справка", "Утилиты", "Музыка", "Администрирование")
+CATEGORY_ORDER = ("Справка", "Утилиты", "Алхимия и валюта", "Музыка", "Администрирование")
 
 
 # Единый каталог команд, чтобы общая и подробная справка не расходились.
@@ -27,7 +27,7 @@ COMMANDS_INFO = {
         "short": "Показывает краткую сводку по всем доступным командам и функциям бота.",
         "params": [],
         "details": [
-            "Команда выводит основные разделы: справка, утилиты, администрирование, контекстные действия и автоматические функции.",
+            "Команда выводит основные разделы: справка, утилиты, алхимия и валюта, музыка, администрирование.",
             "Для подробного описания конкретной команды используйте `/help_command`.",
         ],
         "admin_only": False,
@@ -68,8 +68,8 @@ COMMANDS_INFO = {
         "details": [
             "В профиле отображаются дата создания аккаунта, дата входа на сервер, текущий статус, активности, роли, буст сервера и важные права.",
             "Также показывается статистика по серверу: количество сообщений, сообщений в день, суммарное время в голосовых каналах, голосовое время в день и последнее сообщение.",
+            "В блоке `Валюта и алхимия` отображаются баланс, количество элементов и первые открытия.",
             "Для сообщений и голосовой активности рядом со значением показывается место участника в соответствующем серверном рейтинге.",
-            "Статистика начинает собираться после установки обновления и не подтягивает старую историю автоматически.",
             "Команда доступна всем участникам и работает только на сервере.",
         ],
         "admin_only": False,
@@ -90,7 +90,6 @@ COMMANDS_INFO = {
             "В списке выводятся никнеймы участников без упоминаний и ссылок.",
             "На одной странице показывается до 15 участников. Если данных больше, под сообщением появляются кнопки `Назад` и `Вперёд`.",
             "Кнопки листания доступны только пользователю, который вызвал команду.",
-            "Статистика сообщений и голосовой активности собирается с момента установки обновления и не подтягивает старую историю автоматически.",
         ],
         "admin_only": False,
     },
@@ -126,8 +125,8 @@ COMMANDS_INFO = {
         ],
         "admin_only": False,
     },
-    "serverinfo": {
-        "title": "/serverinfo",
+    "server_info": {
+        "title": "/server_info",
         "category": "Утилиты",
         "kind": "Слэш-команда",
         "short": "Показывает красивый профиль текущего сервера с оформлением, участниками, каналами, бустами и функциями.",
@@ -166,6 +165,87 @@ COMMANDS_INFO = {
         ],
         "details": [
             "Команда работает только в каналах, которые заранее разрешены через `/add_anonimus_channel`.",
+        ],
+        "admin_only": False,
+    },
+    "daily": {
+        "title": "/daily",
+        "category": "Алхимия и валюта",
+        "kind": "Слэш-команда",
+        "short": "Выдаёт ежедневную валюту.",
+        "params": [],
+        "details": [
+            "Команда доступна один раз в день для каждого пользователя.",
+            "Валюта используется в алхимии и может использоваться другими будущими механиками.",
+            "Если кошелька ещё нет, команда создаст его автоматически.",
+        ],
+        "admin_only": False,
+    },
+    "balance": {
+        "title": "/balance",
+        "category": "Алхимия и валюта",
+        "kind": "Слэш-команда",
+        "short": "Показывает ваш текущий баланс.",
+        "params": [],
+        "details": [
+            "Ответ виден только вам.",
+            "Баланс общий для алхимии и других механик, которые будут использовать валюту.",
+        ],
+        "admin_only": False,
+    },
+    "alchemy_start": {
+        "title": "/alchemy_start",
+        "category": "Алхимия и валюта",
+        "kind": "Слэш-команда",
+        "short": "Запускает мини-игру Алхимия и выдаёт стартовые элементы.",
+        "params": [],
+        "details": [
+            "После запуска вы получаете базовые элементы: вода, огонь, земля и воздух.",
+            "Если кошелёк уже был создан через `/daily`, команда доинициализирует алхимию и выдаст стартовый набор.",
+            "Повторный запуск не сбрасывает прогресс.",
+        ],
+        "admin_only": False,
+    },
+    "alchemy_combine": {
+        "title": "/alchemy_combine",
+        "category": "Алхимия и валюта",
+        "kind": "Слэш-команда",
+        "short": "Соединяет два ваших элемента и пытается открыть новый рецепт.",
+        "params": [
+            ("element_1", "Первый элемент. Нужно указать русское слово из вашей коллекции."),
+            ("element_2", "Второй элемент. Нужно указать русское слово из вашей коллекции."),
+        ],
+        "details": [
+            "Команда требует запущенную алхимию через `/alchemy_start`.",
+            "За попытку списывается валюта.",
+        ],
+        "admin_only": False,
+    },
+    "alchemy_inventory": {
+        "title": "/alchemy_inventory",
+        "category": "Алхимия и валюта",
+        "kind": "Слэш-команда + кнопки",
+        "short": "Показывает вашу коллекцию элементов списком.",
+        "params": [],
+        "details": [
+            "Ответ виден только вам.",
+            "Элементы выводятся построчно с нумерацией.",
+            "Если элементов много, под сообщением появляются кнопки `Назад` и `Вперёд`.",
+            "Кнопки листания доступны только пользователю, который вызвал команду.",
+        ],
+        "admin_only": False,
+    },
+    "alchemy_recipes": {
+        "title": "/alchemy_recipes",
+        "category": "Алхимия и валюта",
+        "kind": "Слэш-команда + кнопки",
+        "short": "Показывает рецепты, уже открытые на сервере.",
+        "params": [],
+        "details": [
+            "Команда помогает не проверять одни и те же сочетания бесконечно.",
+            "В списке показаны два исходных элемента, результат и первооткрыватель на сервере.",
+            "Если рецептов много, под сообщением появляются кнопки `Назад` и `Вперёд`.",
+            "Кнопки листания доступны только пользователю, который вызвал команду.",
         ],
         "admin_only": False,
     },
@@ -250,7 +330,6 @@ COMMANDS_INFO = {
             "Участники добавляются и удаляются автоматически при постановке или снятии реакции.",
             "В канал, где вызвали команду, бот отправляет админ-панель со статистикой участников и кнопкой завершения.",
             "Завершать розыгрыш через кнопку может только администратор.",
-            "Перед выбором победителей бот синхронизирует участников с фактическими реакциями под сообщением.",
         ],
         "admin_only": True,
     },
@@ -356,14 +435,6 @@ COMMANDS_INFO = {
         "admin_only": False,
     },
 }
-
-
-HELP_COMMAND_CHOICES = commands.option_enum(
-    {
-        info["title"]: command_key
-        for command_key, info in COMMANDS_INFO.items()
-    }
-)
 
 
 class HelpPaginationView(disnake.ui.View):
@@ -479,6 +550,21 @@ class Help(commands.Cog):
         return ordered_commands
 
     @staticmethod
+    def _get_help_command_matches(current: str) -> list[tuple[str, str]]:
+        current_lower = current.strip().lower()
+        matches = []
+
+        for command_key, info in COMMANDS_INFO.items():
+            title = info["title"]
+            haystacks = (command_key.lower(), title.lower())
+            if current_lower and not any(current_lower in haystack for haystack in haystacks):
+                continue
+            matches.append((title, command_key))
+
+        matches.sort(key=lambda item: item[0])
+        return matches[:25]
+
+    @staticmethod
     def _chunk_commands(
         commands_info: list[tuple[str, dict]],
     ) -> list[list[tuple[str, dict]]]:
@@ -540,7 +626,7 @@ class Help(commands.Cog):
     async def help_command(
         self,
         inter: disnake.ApplicationCommandInteraction,
-        command: HELP_COMMAND_CHOICES,
+        command: str,
     ):
         """
         Помощь по отдельным командам.
@@ -550,6 +636,13 @@ class Help(commands.Cog):
         command: Интересующая команда
         """
         try:
+            if command not in COMMANDS_INFO:
+                await inter.response.send_message(
+                    "Команда не найдена. Начните ввод и выберите вариант из подсказок.",
+                    ephemeral=True,
+                )
+                return
+
             command_info = COMMANDS_INFO[command]
             embed = self._build_embed(title=command_info["title"])
 
@@ -575,6 +668,17 @@ class Help(commands.Cog):
         except Exception as e:
             self.logger.exception(f"Ошибка в help_commands/help_command: {e}")
             print(f"Ошибка в help_commands/help_command: {e}")
+
+    @help_command.autocomplete("command")
+    async def autocomplete_help_command(
+        self,
+        inter: disnake.ApplicationCommandInteraction,
+        current: str,
+    ):
+        return {
+            title: command_key
+            for title, command_key in self._get_help_command_matches(current)
+        }
 
 
 def setup(bot, logger):

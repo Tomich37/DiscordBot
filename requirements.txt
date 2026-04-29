@@ -1,4 +1,5 @@
 disnake
+gigachat
 configparser
 sqlalchemy
 psycopg2

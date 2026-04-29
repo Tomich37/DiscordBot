@@ -21,6 +21,12 @@ FOOTER_TEXT = "Made by the_usual_god"
 LEADERBOARD_PAGE_SIZE = 15
 
 
+async def send_interaction_message(inter, *args, **kwargs):
+    if inter.response.is_done():
+        return await inter.followup.send(*args, **kwargs)
+    return await inter.response.send_message(*args, **kwargs)
+
+
 class LeaderboardPaginationView(disnake.ui.View):
     def __init__(self, author_id: int, pages: list[disnake.Embed]) -> None:
         self.author_id = author_id
@@ -108,7 +114,7 @@ class SlashCommands(commands.Cog):
         description="Понг",
     )
     async def ping(self, inter):
-        await inter.response.send_message(f"Понг! {round(self.bot.latency * 1000)}мс")
+        await send_interaction_message(inter, f"Понг! {round(self.bot.latency * 1000)}мс")
 
     @staticmethod
     def _format_timestamp(value) -> str:
@@ -314,6 +320,21 @@ class SlashCommands(commands.Cog):
             f"{voice_line}"
             f"\n**Голоса в день:** `~{SlashCommands._format_duration(int(voice_seconds_per_day))}` ({voice_daily_rank})"
             f"{last_message_line}"
+        )
+
+    @staticmethod
+    def _format_alchemy_stats(stats: dict) -> str:
+        if not stats.get("exists"):
+            return (
+                "**Баланс:** `0`\n"
+                "**Элементов:** `0`\n"
+                "**Первые открытия:** `0`"
+            )
+
+        return (
+            f"**Баланс:** `{stats['balance']}`\n"
+            f"**Элементов:** `{stats['element_count']}`\n"
+            f"**Первые открытия:** `{stats['first_discovery_count']}`"
         )
 
     @staticmethod
@@ -556,6 +577,7 @@ class SlashCommands(commands.Cog):
         username = str(member)
         stats = await self._get_profile_stats(member)
         ranks = await self._get_profile_ranks(member)
+        alchemy_stats = self.db.get_alchemy_profile(member.guild.id, member.id)
 
         embed = disnake.Embed(
             title=f"Профиль: {display_name}",
@@ -585,6 +607,11 @@ class SlashCommands(commands.Cog):
         embed.add_field(
             name="Статистика сервера",
             value=self._format_profile_stats(stats, ranks),
+            inline=False,
+        )
+        embed.add_field(
+            name="Валюта и алхимия",
+            value=self._format_alchemy_stats(alchemy_stats),
             inline=False,
         )
         embed.add_field(name="Роли", value=self._format_roles(member), inline=False)
@@ -873,7 +900,7 @@ class SlashCommands(commands.Cog):
         human_count = guild.member_count - bot_count if guild.member_count else 0
         return human_count, bot_count
 
-    def _build_serverinfo_embed(self, guild: disnake.Guild) -> disnake.Embed:
+    def _build_server_info_embed(self, guild: disnake.Guild) -> disnake.Embed:
         human_count, bot_count = self._count_humans_and_bots(guild)
         text_channels = len(guild.text_channels)
         voice_channels = len(guild.voice_channels)
@@ -947,24 +974,24 @@ class SlashCommands(commands.Cog):
         return embed
 
     @commands.slash_command(
-        name="serverinfo",
+        name="server_info",
         description="Показать красивый профиль сервера",
         dm_permission=False,
     )
-    async def serverinfo(self, inter: disnake.GuildCommandInteraction):
+    async def server_info(self, inter: disnake.GuildCommandInteraction):
         """
         Профиль текущего сервера.
         """
         try:
-            embed = self._build_serverinfo_embed(inter.guild)
+            embed = self._build_server_info_embed(inter.guild)
             await inter.response.send_message(embed=embed)
         except Exception as e:
             await inter.response.send_message(
                 "Не получилось собрать профиль сервера.",
                 ephemeral=True,
             )
-            self.logger.exception(f"Ошибка в commands/serverinfo: {e}")
-            print(f"Ошибка в commands/serverinfo: {e}")
+            self.logger.exception(f"Ошибка в commands/server_info: {e}")
+            print(f"Ошибка в commands/server_info: {e}")
 
     roleMenegment = commands.option_enum({"Назначить роль": "add", "Снять роль": "take"})
 

@@ -1,4 +1,10 @@
 from app.modules.alchemy_connect import (
+    AlchemyElement,
+    AlchemyGuildDiscovery,
+    AlchemyPlayer,
+    AlchemyPlayerElement,
+    AlchemyRecipe,
+    AlchemyTransaction,
     ContestMessage,
     ContestRun,
     Contests,
@@ -17,11 +23,574 @@ from app.modules.alchemy_connect import (
     TrackedChannel,
     engine,
 )
-from datetime import datetime
+from datetime import date, datetime
 
 
 class Database:
     MUSIC_PENDING_STATUSES = ("pending",)
+    GLOBAL_ALCHEMY_GUILD_ID = 0
+
+    def _get_alchemy_player(self, db, guild_id: int, user_id: int):
+        return db.query(AlchemyPlayer).filter_by(guild_id=guild_id, user_id=user_id).first()
+
+    def _get_global_alchemy_element(self, db, normalized_name: str):
+        return (
+            db.query(AlchemyElement)
+            .filter_by(guild_id=self.GLOBAL_ALCHEMY_GUILD_ID, normalized_name=normalized_name)
+            .first()
+        )
+
+    def _get_or_create_alchemy_element(
+        self,
+        db,
+        normalized_name: str,
+        display_name: str,
+        first_discoverer_id: int | None = None,
+    ):
+        element = self._get_global_alchemy_element(db, normalized_name)
+        if element:
+            return element, False
+
+        element = AlchemyElement(
+            guild_id=self.GLOBAL_ALCHEMY_GUILD_ID,
+            normalized_name=normalized_name,
+            display_name=display_name,
+            first_discoverer_id=first_discoverer_id,
+        )
+        db.add(element)
+        db.flush()
+        return element, True
+
+    def _add_alchemy_player_element(self, db, player_id: int, element_id: int) -> bool:
+        existing_element = (
+            db.query(AlchemyPlayerElement)
+            .filter_by(player_id=player_id, element_id=element_id)
+            .first()
+        )
+        if existing_element:
+            return False
+
+        db.add(AlchemyPlayerElement(player_id=player_id, element_id=element_id))
+        db.flush()
+        return True
+
+    def _add_alchemy_transaction(self, db, player: AlchemyPlayer, amount: int, reason: str):
+        db.add(
+            AlchemyTransaction(
+                player_id=player.id,
+                amount=amount,
+                reason=reason,
+                balance_after=player.balance,
+            )
+        )
+
+    def _ensure_base_alchemy_elements(self, db, player: AlchemyPlayer, base_elements: list[tuple[str, str]]) -> int:
+        added_count = 0
+        for normalized_name, display_name in base_elements:
+            element, _ = self._get_or_create_alchemy_element(
+                db,
+                normalized_name,
+                display_name,
+            )
+            if self._add_alchemy_player_element(db, player.id, element.id):
+                added_count += 1
+        return added_count
+
+    def start_alchemy_player(
+        self,
+        guild_id: int,
+        user_id: int,
+        start_balance: int,
+        base_elements: list[tuple[str, str]],
+    ) -> dict:
+        with Session(autoflush=False, bind=engine) as db:
+            player = self._get_alchemy_player(db, guild_id, user_id)
+            if player:
+                existing_element_count = db.query(AlchemyPlayerElement).filter_by(player_id=player.id).count()
+                added_count = self._ensure_base_alchemy_elements(db, player, base_elements)
+                if added_count:
+                    if existing_element_count == 0 and start_balance > 0:
+                        player.balance += start_balance
+                        self._add_alchemy_transaction(db, player, start_balance, "alchemy_start")
+                    player.updated_at = datetime.utcnow()
+                    db.commit()
+
+                return {
+                    "created": bool(added_count),
+                    "balance": player.balance,
+                    "first_discovery_count": player.first_discovery_count,
+                    "element_count": existing_element_count + added_count,
+                }
+
+            now = datetime.utcnow()
+            player = AlchemyPlayer(
+                guild_id=guild_id,
+                user_id=user_id,
+                balance=start_balance,
+                created_at=now,
+                updated_at=now,
+            )
+            db.add(player)
+            db.flush()
+            self._add_alchemy_transaction(db, player, start_balance, "start")
+
+            self._ensure_base_alchemy_elements(db, player, base_elements)
+
+            db.commit()
+            return {
+                "created": True,
+                "balance": player.balance,
+                "first_discovery_count": player.first_discovery_count,
+                "element_count": len(base_elements),
+            }
+
+    def claim_daily_reward(self, guild_id: int, user_id: int, reward: int, today: date) -> dict:
+        with Session(autoflush=False, bind=engine) as db:
+            player = self._get_alchemy_player(db, guild_id, user_id)
+            if not player:
+                now = datetime.utcnow()
+                player = AlchemyPlayer(
+                    guild_id=guild_id,
+                    user_id=user_id,
+                    balance=0,
+                    created_at=now,
+                    updated_at=now,
+                )
+                db.add(player)
+                db.flush()
+
+            if player.last_daily_at == today:
+                return {
+                    "status": "already_claimed",
+                    "balance": player.balance,
+                    "last_daily_at": player.last_daily_at,
+                }
+
+            player.balance += reward
+            player.last_daily_at = today
+            player.updated_at = datetime.utcnow()
+            self._add_alchemy_transaction(db, player, reward, "daily")
+            db.commit()
+            return {
+                "status": "claimed",
+                "balance": player.balance,
+                "reward": reward,
+                "last_daily_at": player.last_daily_at,
+            }
+
+    def get_alchemy_profile(self, guild_id: int, user_id: int) -> dict:
+        with Session(autoflush=False, bind=engine) as db:
+            player = self._get_alchemy_player(db, guild_id, user_id)
+            if not player:
+                return {
+                    "exists": False,
+                    "balance": 0,
+                    "first_discovery_count": 0,
+                    "element_count": 0,
+                    "last_daily_at": None,
+                }
+
+            element_count = (
+                db.query(AlchemyPlayerElement)
+                .filter_by(player_id=player.id)
+                .count()
+            )
+            return {
+                "exists": True,
+                "balance": player.balance,
+                "first_discovery_count": player.first_discovery_count,
+                "element_count": element_count,
+                "last_daily_at": player.last_daily_at,
+            }
+
+    def get_alchemy_inventory_count(self, guild_id: int, user_id: int) -> int:
+        with Session(autoflush=False, bind=engine) as db:
+            player = self._get_alchemy_player(db, guild_id, user_id)
+            if not player:
+                return 0
+
+            return db.query(AlchemyPlayerElement).filter_by(player_id=player.id).count()
+
+    def has_alchemy_elements(self, guild_id: int, user_id: int, element_names: list[str]) -> dict:
+        with Session(autoflush=False, bind=engine) as db:
+            player = self._get_alchemy_player(db, guild_id, user_id)
+            if not player:
+                return {"status": "not_started", "missing": element_names}
+
+            if not db.query(AlchemyPlayerElement).filter_by(player_id=player.id).first():
+                return {"status": "not_started", "missing": element_names}
+
+            owned_rows = (
+                db.query(AlchemyElement.normalized_name)
+                .join(AlchemyPlayerElement, AlchemyPlayerElement.element_id == AlchemyElement.id)
+                .filter(
+                    AlchemyPlayerElement.player_id == player.id,
+                    AlchemyElement.guild_id == self.GLOBAL_ALCHEMY_GUILD_ID,
+                    AlchemyElement.normalized_name.in_(element_names),
+                )
+                .all()
+            )
+            owned_names = {row[0] for row in owned_rows}
+            missing = [element_name for element_name in element_names if element_name not in owned_names]
+            return {"status": "ok", "missing": missing}
+
+    def claim_alchemy_daily(self, guild_id: int, user_id: int, reward: int, today: date) -> dict:
+        with Session(autoflush=False, bind=engine) as db:
+            player = self._get_alchemy_player(db, guild_id, user_id)
+            if not player:
+                return {"status": "not_started"}
+            if player.last_daily_at == today:
+                return {
+                    "status": "already_claimed",
+                    "balance": player.balance,
+                    "last_daily_at": player.last_daily_at,
+                }
+
+            player.balance += reward
+            player.last_daily_at = today
+            player.updated_at = datetime.utcnow()
+            self._add_alchemy_transaction(db, player, reward, "daily")
+            db.commit()
+            return {
+                "status": "claimed",
+                "balance": player.balance,
+                "reward": reward,
+                "last_daily_at": player.last_daily_at,
+            }
+
+    def spend_alchemy_currency(self, guild_id: int, user_id: int, amount: int, reason: str = "combine") -> dict:
+        with Session(autoflush=False, bind=engine) as db:
+            player = self._get_alchemy_player(db, guild_id, user_id)
+            if not player:
+                return {"status": "not_started"}
+            if player.balance < amount:
+                return {"status": "not_enough", "balance": player.balance}
+
+            player.balance -= amount
+            player.updated_at = datetime.utcnow()
+            self._add_alchemy_transaction(db, player, -amount, reason)
+            db.commit()
+            return {"status": "spent", "balance": player.balance}
+
+    def refund_alchemy_currency(self, guild_id: int, user_id: int, amount: int, reason: str = "refund") -> dict:
+        with Session(autoflush=False, bind=engine) as db:
+            player = self._get_alchemy_player(db, guild_id, user_id)
+            if not player:
+                return {"status": "not_started"}
+
+            player.balance += amount
+            player.updated_at = datetime.utcnow()
+            self._add_alchemy_transaction(db, player, amount, reason)
+            db.commit()
+            return {"status": "refunded", "balance": player.balance}
+
+    def get_alchemy_recipe(self, guild_id: int, left_element: str, right_element: str) -> dict | None:
+        with Session(autoflush=False, bind=engine) as db:
+            recipe = (
+                db.query(AlchemyRecipe)
+                .filter_by(
+                    guild_id=self.GLOBAL_ALCHEMY_GUILD_ID,
+                    left_element=left_element,
+                    right_element=right_element,
+                )
+                .first()
+            )
+            if not recipe:
+                return None
+
+            result = db.query(AlchemyElement).filter_by(id=recipe.result_element_id).first()
+            if not result:
+                return None
+
+            guild_discovery = (
+                db.query(AlchemyGuildDiscovery)
+                .filter_by(guild_id=guild_id, recipe_id=recipe.id)
+                .first()
+            )
+            return {
+                "id": recipe.id,
+                "result_normalized": result.normalized_name,
+                "result_display": result.display_name,
+                "global_first_discoverer_id": recipe.first_discoverer_id,
+                "guild_first_discoverer_id": (
+                    guild_discovery.first_discoverer_id if guild_discovery else None
+                ),
+                "is_discovered_on_guild": bool(guild_discovery),
+                "created_at": recipe.created_at,
+            }
+
+    def get_discovered_alchemy_recipes_page(self, guild_id: int, page: int, page_size: int) -> dict:
+        with Session(autoflush=False, bind=engine) as db:
+            base_query = (
+                db.query(AlchemyGuildDiscovery)
+                .filter_by(guild_id=guild_id)
+            )
+            total_count = base_query.count()
+            total_pages = max((total_count + page_size - 1) // page_size, 1)
+            page = min(max(page, 0), total_pages - 1)
+
+            discoveries = (
+                base_query
+                .order_by(AlchemyGuildDiscovery.discovered_at.desc())
+                .offset(page * page_size)
+                .limit(page_size)
+                .all()
+            )
+
+            items = []
+            for discovery in discoveries:
+                recipe = db.query(AlchemyRecipe).filter_by(id=discovery.recipe_id).first()
+                if not recipe:
+                    continue
+
+                result = db.query(AlchemyElement).filter_by(id=recipe.result_element_id).first()
+                if not result:
+                    continue
+
+                items.append(
+                    {
+                        "left_element": recipe.left_element,
+                        "right_element": recipe.right_element,
+                        "result_display": result.display_name,
+                        "first_discoverer_id": discovery.first_discoverer_id,
+                        "discovered_at": discovery.discovered_at,
+                    }
+                )
+
+            return {
+                "items": items,
+                "page": page,
+                "total_pages": total_pages,
+                "total_count": total_count,
+            }
+
+    def learn_known_alchemy_recipe(self, guild_id: int, user_id: int, result_normalized: str) -> dict:
+        with Session(autoflush=False, bind=engine) as db:
+            player = self._get_alchemy_player(db, guild_id, user_id)
+            if not player:
+                return {"status": "not_started"}
+
+            element = (
+                db.query(AlchemyElement)
+                .filter_by(
+                    guild_id=self.GLOBAL_ALCHEMY_GUILD_ID,
+                    normalized_name=result_normalized,
+                )
+                .first()
+            )
+            if not element:
+                return {"status": "missing_element"}
+
+            added = self._add_alchemy_player_element(db, player.id, element.id)
+            db.commit()
+            return {
+                "status": "learned",
+                "added_to_inventory": added,
+                "result_display": element.display_name,
+            }
+
+    def discover_known_alchemy_recipe_on_guild(
+        self,
+        guild_id: int,
+        user_id: int,
+        recipe_id: int,
+    ) -> dict:
+        with Session(autoflush=False, bind=engine) as db:
+            player = self._get_alchemy_player(db, guild_id, user_id)
+            if not player:
+                return {"status": "not_started"}
+
+            recipe = db.query(AlchemyRecipe).filter_by(id=recipe_id).first()
+            if not recipe:
+                return {"status": "missing_recipe"}
+
+            result = db.query(AlchemyElement).filter_by(id=recipe.result_element_id).first()
+            if not result:
+                return {"status": "missing_element"}
+
+            discovery = (
+                db.query(AlchemyGuildDiscovery)
+                .filter_by(guild_id=guild_id, recipe_id=recipe.id)
+                .first()
+            )
+            added = self._add_alchemy_player_element(db, player.id, result.id)
+            if discovery:
+                db.commit()
+                return {
+                    "status": "already_discovered_on_guild",
+                    "result_display": result.display_name,
+                    "result_normalized": result.normalized_name,
+                    "added_to_inventory": added,
+                    "guild_first_discoverer_id": discovery.first_discoverer_id,
+                }
+
+            db.add(
+                AlchemyGuildDiscovery(
+                    guild_id=guild_id,
+                    recipe_id=recipe.id,
+                    first_discoverer_id=user_id,
+                )
+            )
+            player.first_discovery_count += 1
+            player.updated_at = datetime.utcnow()
+            db.commit()
+            return {
+                "status": "discovered_on_guild",
+                "result_display": result.display_name,
+                "result_normalized": result.normalized_name,
+                "added_to_inventory": added,
+                "first_discovery_count": player.first_discovery_count,
+            }
+
+    def create_alchemy_discovery(
+        self,
+        guild_id: int,
+        user_id: int,
+        left_element: str,
+        right_element: str,
+        result_normalized: str,
+        result_display: str,
+        openai_response_id: str | None = None,
+    ) -> dict:
+        with Session(autoflush=False, bind=engine) as db:
+            player = self._get_alchemy_player(db, guild_id, user_id)
+            if not player:
+                return {"status": "not_started"}
+
+            existing_recipe = (
+                db.query(AlchemyRecipe)
+                .filter_by(
+                    guild_id=self.GLOBAL_ALCHEMY_GUILD_ID,
+                    left_element=left_element,
+                    right_element=right_element,
+                )
+                .first()
+            )
+            if existing_recipe:
+                result = db.query(AlchemyElement).filter_by(id=existing_recipe.result_element_id).first()
+                added = self._add_alchemy_player_element(db, player.id, result.id)
+                discovery = (
+                    db.query(AlchemyGuildDiscovery)
+                    .filter_by(guild_id=guild_id, recipe_id=existing_recipe.id)
+                    .first()
+                )
+                if not discovery:
+                    db.add(
+                        AlchemyGuildDiscovery(
+                            guild_id=guild_id,
+                            recipe_id=existing_recipe.id,
+                            first_discoverer_id=user_id,
+                        )
+                    )
+                    player.first_discovery_count += 1
+                    player.updated_at = datetime.utcnow()
+                    db.commit()
+                    return {
+                        "status": "discovered_on_guild",
+                        "result_display": result.display_name,
+                        "result_normalized": result.normalized_name,
+                        "added_to_inventory": added,
+                        "first_discovery_count": player.first_discovery_count,
+                    }
+
+                db.commit()
+                return {
+                    "status": "already_discovered_on_guild",
+                    "result_display": result.display_name,
+                    "result_normalized": result.normalized_name,
+                    "added_to_inventory": added,
+                }
+
+            element, created_element = self._get_or_create_alchemy_element(
+                db,
+                result_normalized,
+                result_display,
+                first_discoverer_id=user_id,
+            )
+            recipe = AlchemyRecipe(
+                guild_id=self.GLOBAL_ALCHEMY_GUILD_ID,
+                left_element=left_element,
+                right_element=right_element,
+                result_element_id=element.id,
+                first_discoverer_id=user_id,
+                openai_response_id=openai_response_id,
+            )
+            db.add(recipe)
+            db.flush()
+            db.add(
+                AlchemyGuildDiscovery(
+                    guild_id=guild_id,
+                    recipe_id=recipe.id,
+                    first_discoverer_id=user_id,
+                )
+            )
+            self._add_alchemy_player_element(db, player.id, element.id)
+            player.first_discovery_count += 1
+            player.updated_at = datetime.utcnow()
+
+            db.commit()
+            return {
+                "status": "created",
+                "result_display": element.display_name,
+                "result_normalized": element.normalized_name,
+                "created_element": created_element,
+                "first_discovery_count": player.first_discovery_count,
+            }
+
+    def get_alchemy_inventory_page(self, guild_id: int, user_id: int, page: int, page_size: int) -> dict:
+        with Session(autoflush=False, bind=engine) as db:
+            player = self._get_alchemy_player(db, guild_id, user_id)
+            if not player:
+                return {"status": "not_started", "items": [], "page": 0, "total_pages": 1, "total_count": 0}
+
+            if not db.query(AlchemyPlayerElement).filter_by(player_id=player.id).first():
+                return {"status": "not_started", "items": [], "page": 0, "total_pages": 1, "total_count": 0}
+
+            base_query = (
+                db.query(AlchemyElement.display_name)
+                .join(AlchemyPlayerElement, AlchemyPlayerElement.element_id == AlchemyElement.id)
+                .filter(
+                    AlchemyPlayerElement.player_id == player.id,
+                    AlchemyElement.guild_id == self.GLOBAL_ALCHEMY_GUILD_ID,
+                )
+            )
+            total_count = base_query.count()
+            total_pages = max((total_count + page_size - 1) // page_size, 1)
+            page = min(max(page, 0), total_pages - 1)
+            rows = (
+                base_query
+                .order_by(AlchemyElement.display_name.asc())
+                .offset(page * page_size)
+                .limit(page_size)
+                .all()
+            )
+            return {
+                "status": "ok",
+                "items": [row[0] for row in rows],
+                "page": page,
+                "total_pages": total_pages,
+                "total_count": total_count,
+            }
+
+    def get_alchemy_top(self, guild_id: int, limit: int = 10) -> list[dict]:
+        with Session(autoflush=False, bind=engine) as db:
+            players = (
+                db.query(AlchemyPlayer)
+                .filter_by(guild_id=guild_id)
+                .order_by(AlchemyPlayer.first_discovery_count.desc(), AlchemyPlayer.balance.desc())
+                .limit(limit)
+                .all()
+            )
+            return [
+                {
+                    "user_id": player.user_id,
+                    "balance": player.balance,
+                    "first_discovery_count": player.first_discovery_count,
+                    "element_count": db.query(AlchemyPlayerElement).filter_by(player_id=player.id).count(),
+                }
+                for player in players
+                if player.first_discovery_count > 0 or player.balance > 0
+            ]
 
     def _get_or_create_user_stats(self, db, guild_id: int, user_id: int):
         stats = db.query(GuildUserStats).filter_by(guild_id=guild_id, user_id=user_id).first()

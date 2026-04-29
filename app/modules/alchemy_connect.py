@@ -167,6 +167,88 @@ class MusicPlaylistTrack(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
+class AlchemyPlayer(Base):
+    __tablename__ = "alchemy_players"
+    __table_args__ = (
+        UniqueConstraint("guild_id", "user_id", name="uq_alchemy_player"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    guild_id = Column(BigInteger, nullable=False, index=True)
+    user_id = Column(BigInteger, nullable=False, index=True)
+    balance = Column(Integer, default=0, nullable=False)
+    first_discovery_count = Column(Integer, default=0, nullable=False)
+    last_daily_at = Column(Date, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class AlchemyElement(Base):
+    __tablename__ = "alchemy_elements"
+    __table_args__ = (
+        UniqueConstraint("guild_id", "normalized_name", name="uq_alchemy_element"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    guild_id = Column(BigInteger, nullable=False, index=True)
+    normalized_name = Column(String(80), nullable=False, index=True)
+    display_name = Column(String(80), nullable=False)
+    first_discoverer_id = Column(BigInteger, nullable=True, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class AlchemyRecipe(Base):
+    __tablename__ = "alchemy_recipes"
+    __table_args__ = (
+        UniqueConstraint("guild_id", "left_element", "right_element", name="uq_alchemy_recipe_pair"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    guild_id = Column(BigInteger, nullable=False, index=True)
+    left_element = Column(String(80), nullable=False, index=True)
+    right_element = Column(String(80), nullable=False, index=True)
+    result_element_id = Column(Integer, ForeignKey("alchemy_elements.id"), nullable=False, index=True)
+    first_discoverer_id = Column(BigInteger, nullable=False, index=True)
+    openai_response_id = Column(String(120), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class AlchemyGuildDiscovery(Base):
+    __tablename__ = "alchemy_guild_discoveries"
+    __table_args__ = (
+        UniqueConstraint("guild_id", "recipe_id", name="uq_alchemy_guild_discovery"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    guild_id = Column(BigInteger, nullable=False, index=True)
+    recipe_id = Column(Integer, ForeignKey("alchemy_recipes.id"), nullable=False, index=True)
+    first_discoverer_id = Column(BigInteger, nullable=False, index=True)
+    discovered_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class AlchemyPlayerElement(Base):
+    __tablename__ = "alchemy_player_elements"
+    __table_args__ = (
+        UniqueConstraint("player_id", "element_id", name="uq_alchemy_player_element"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    player_id = Column(Integer, ForeignKey("alchemy_players.id"), nullable=False, index=True)
+    element_id = Column(Integer, ForeignKey("alchemy_elements.id"), nullable=False, index=True)
+    discovered_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class AlchemyTransaction(Base):
+    __tablename__ = "alchemy_transactions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    player_id = Column(Integer, ForeignKey("alchemy_players.id"), nullable=False, index=True)
+    amount = Column(Integer, nullable=False)
+    reason = Column(String(40), nullable=False, index=True)
+    balance_after = Column(Integer, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 class TrackedChannel(Base):
     __tablename__ = "tracked_channels"
     id = Column(Integer, primary_key=True, index=True)
