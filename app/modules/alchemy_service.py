@@ -160,22 +160,23 @@ class AlchemyGenerator:
         rejected_results_text = ""
         if rejected_results:
             rejected_results_text = (
-                "\nЗапрещённые варианты результата: "
+                "\nЗапрещённые варианты результата из цепочек исходных элементов: "
                 + ", ".join(rejected_results)
                 + "."
             )
 
         system_prompt = (
             "Ты движок мини-игры 'Алхимия' для русскоязычного Discord-сервера. "
-            "По двум элементам придумай один логичный результат. "
+            "По двум элементам придумай один логичный результат, которого ещё нет в игре. "
             "Верни только JSON вида {\"result\":\"слово\"}. Значение result должно быть одним русским существительным, "
             "без пояснений, эмодзи, кавычек внутри слова и лишних слов. "
-            "Результат не должен совпадать ни с первым, ни со вторым исходным элементом."
+            "Результат не должен совпадать ни с первым, ни со вторым исходным элементом. "
+            "Результат обязан быть новым: не используй ни одно слово из списка запрещённых вариантов."
         )
         user_prompt = (
             f"Элемент 1: {left_word}\n"
             f"Элемент 2: {right_word}\n"
-            "Нужен результат сочетания."
+            "Нужен новый результат сочетания."
             f"{rejected_results_text}"
         )
         return self.chat_payload_class(
@@ -214,10 +215,17 @@ class AlchemyGenerator:
         async with _GIGACHAT_REQUEST_SEMAPHORE:
             return await asyncio.to_thread(self._request_result, left_word, right_word, rejected_results)
 
-    async def generate_result(self, left_word: str, right_word: str) -> dict:
+    async def generate_result(
+        self,
+        left_word: str,
+        right_word: str,
+        existing_results: tuple[str, ...] = (),
+        unavailable_results: tuple[str, ...] = (),
+    ) -> dict:
         self.ensure_ready()
 
-        rejected_results = (left_word, right_word)
+        rejected_results = tuple(dict.fromkeys((left_word, right_word, *existing_results)))
+        unavailable_results_set = set(unavailable_results)
         last_error = None
 
         for _ in range(GIGACHAT_GENERATION_ATTEMPTS):
@@ -242,6 +250,14 @@ class AlchemyGenerator:
                 if normalized_candidate and normalized_candidate not in rejected_results:
                     rejected_results = rejected_results + (normalized_candidate,)
                 last_error = AlchemyGenerationError(str(error))
+                continue
+
+            if result in rejected_results:
+                last_error = AlchemyGenerationError(f"Результат уже существует в игре: {result}.")
+                continue
+            if result in unavailable_results_set:
+                rejected_results = rejected_results + (result,)
+                last_error = AlchemyGenerationError(f"Результат уже существует в игре: {result}.")
                 continue
 
             return {
