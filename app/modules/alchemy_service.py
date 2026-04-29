@@ -24,6 +24,7 @@ def _read_positive_int_env(name: str, default: int) -> int:
 # все генерации рецептов проходят через общий семафор и ждут своей очереди.
 GIGACHAT_MAX_CONCURRENT_REQUESTS = _read_positive_int_env("GIGACHAT_MAX_CONCURRENT_REQUESTS", 1)
 _GIGACHAT_REQUEST_SEMAPHORE = asyncio.Semaphore(GIGACHAT_MAX_CONCURRENT_REQUESTS)
+GIGACHAT_GENERATION_ATTEMPTS = _read_positive_int_env("GIGACHAT_GENERATION_ATTEMPTS", 3)
 
 
 class AlchemyConfigError(Exception):
@@ -56,6 +57,13 @@ def validate_alchemy_word(value: str) -> str:
         raise ValueError("Результат должен быть русским словом.")
 
     return normalized
+
+
+def validate_alchemy_result(value: str, left_word: str, right_word: str) -> str:
+    result = validate_alchemy_word(value)
+    if result == left_word or result == right_word:
+        raise ValueError("Результат не должен совпадать с исходными элементами.")
+    return result
 
 
 def _extract_response_text(response) -> str:
@@ -148,17 +156,27 @@ class AlchemyGenerator:
         if not self.client:
             raise AlchemyConfigError("GigaChat-клиент не инициализирован.")
 
-    def _build_prompt(self, left_word: str, right_word: str):
+    def _build_prompt(self, left_word: str, right_word: str, rejected_results: tuple[str, ...] = ()):
+        rejected_results_text = ""
+        if rejected_results:
+            rejected_results_text = (
+                "\nЗапрещённые варианты результата: "
+                + ", ".join(rejected_results)
+                + "."
+            )
+
         system_prompt = (
             "Ты движок мини-игры 'Алхимия' для русскоязычного Discord-сервера. "
             "По двум элементам придумай один логичный результат. "
             "Верни только JSON вида {\"result\":\"слово\"}. Значение result должно быть одним русским существительным, "
-            "без пояснений, эмодзи, кавычек внутри слова и лишних слов."
+            "без пояснений, эмодзи, кавычек внутри слова и лишних слов. "
+            "Результат не должен совпадать ни с первым, ни со вторым исходным элементом."
         )
         user_prompt = (
             f"Элемент 1: {left_word}\n"
             f"Элемент 2: {right_word}\n"
             "Нужен результат сочетания."
+            f"{rejected_results_text}"
         )
         return self.chat_payload_class(
             model=self.model,
@@ -184,34 +202,53 @@ class AlchemyGenerator:
             },
         )
 
-    def _request_result(self, left_word: str, right_word: str):
-        return self.client.chat(self._build_prompt(left_word, right_word))
+    def _request_result(self, left_word: str, right_word: str, rejected_results: tuple[str, ...] = ()):
+        return self.client.chat(self._build_prompt(left_word, right_word, rejected_results))
+
+    async def _request_result_with_limit(
+        self,
+        left_word: str,
+        right_word: str,
+        rejected_results: tuple[str, ...] = (),
+    ):
+        async with _GIGACHAT_REQUEST_SEMAPHORE:
+            return await asyncio.to_thread(self._request_result, left_word, right_word, rejected_results)
 
     async def generate_result(self, left_word: str, right_word: str) -> dict:
         self.ensure_ready()
 
-        async with _GIGACHAT_REQUEST_SEMAPHORE:
-            response = await asyncio.to_thread(self._request_result, left_word, right_word)
+        rejected_results = (left_word, right_word)
+        last_error = None
 
-        output_text = _extract_response_text(response)
-        if not output_text:
-            details = _describe_empty_response(response)
-            raise AlchemyGenerationError(f"GigaChat вернул пустой ответ: {details}.")
+        for _ in range(GIGACHAT_GENERATION_ATTEMPTS):
+            response = await self._request_result_with_limit(left_word, right_word, rejected_results)
 
-        try:
-            payload = _extract_json_payload(output_text)
-            raw_result = payload.get("result", "")
-        except json.JSONDecodeError:
-            raw_result = _extract_plain_result(output_text)
+            output_text = _extract_response_text(response)
+            if not output_text:
+                details = _describe_empty_response(response)
+                last_error = AlchemyGenerationError(f"GigaChat вернул пустой ответ: {details}.")
+                continue
 
-        try:
-            result = validate_alchemy_word(raw_result)
-        except ValueError as error:
-            raise AlchemyGenerationError(str(error)) from error
+            try:
+                payload = _extract_json_payload(output_text)
+                raw_result = payload.get("result", "")
+            except json.JSONDecodeError:
+                raw_result = _extract_plain_result(output_text)
 
-        return {
-            "result_normalized": result,
-            "result_display": result,
-            "response_id": getattr(response, "id", None),
-            "model": self.model,
-        }
+            try:
+                result = validate_alchemy_result(raw_result, left_word, right_word)
+            except ValueError as error:
+                normalized_candidate = normalize_alchemy_word(raw_result)
+                if normalized_candidate and normalized_candidate not in rejected_results:
+                    rejected_results = rejected_results + (normalized_candidate,)
+                last_error = AlchemyGenerationError(str(error))
+                continue
+
+            return {
+                "result_normalized": result,
+                "result_display": result,
+                "response_id": getattr(response, "id", None),
+                "model": self.model,
+            }
+
+        raise last_error or AlchemyGenerationError("GigaChat не смог подобрать подходящий результат.")
