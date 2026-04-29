@@ -24,10 +24,29 @@ def _read_positive_int_env(name: str, default: int) -> int:
 # все генерации рецептов проходят через общий семафор и ждут своей очереди.
 GIGACHAT_MAX_CONCURRENT_REQUESTS = _read_positive_int_env("GIGACHAT_MAX_CONCURRENT_REQUESTS", 1)
 _GIGACHAT_REQUEST_SEMAPHORE = asyncio.Semaphore(GIGACHAT_MAX_CONCURRENT_REQUESTS)
-GIGACHAT_GENERATION_ATTEMPTS = _read_positive_int_env("GIGACHAT_GENERATION_ATTEMPTS", 3)
+GIGACHAT_GENERATION_ATTEMPTS = _read_positive_int_env("GIGACHAT_GENERATION_ATTEMPTS", 5)
 ALCHEMY_RESULT_MAX_LENGTH = 80
 ALCHEMY_RESULT_MAX_WORDS = 3
 ALCHEMY_ROOT_MIN_LENGTH = 3
+
+BORING_ALCHEMY_HEAD_WORDS = {
+    "буря",
+    "ветер",
+    "вихрь",
+    "гроза",
+    "дым",
+    "завеса",
+    "облако",
+    "плазма",
+    "поток",
+    "смерч",
+    "сфера",
+    "твердь",
+    "туман",
+    "торнадо",
+    "ураган",
+    "шторм",
+}
 
 RUSSIAN_WORD_SUFFIXES = (
     "иями",
@@ -131,6 +150,11 @@ def _has_forbidden_root(result: str, source_values: tuple[str, ...]) -> bool:
             return True
 
     return False
+
+
+def _is_boring_elemental_result(result: str) -> bool:
+    tokens = _extract_alchemy_tokens(result)
+    return bool(tokens and tokens[-1] in BORING_ALCHEMY_HEAD_WORDS)
 
 
 def validate_alchemy_result(value: str, left_word: str, right_word: str) -> str:
@@ -242,9 +266,11 @@ class AlchemyGenerator:
         system_prompt = (
             "Ты движок мини-игры 'Алхимия' для русскоязычного Discord-сервера. "
             "По двум элементам придумай один новый, интересный и неожиданный результат, которого ещё нет в игре. "
-            "Можно отходить от прямой физики и использовать фантазию, мифы, технологии, быт, культуру, существ, механизмы и явления. "
-            "Хороший стиль: грязь + жизнь = голем, электричество + металл = автомобиль, огонь + птица = феникс. "
-            "Плохой стиль: склеивать части исходных слов, делать стихийные повторы или добавлять суффиксы вроде -сфера, -грунт, -зем. "
+            "Главный приоритет - конкретные предметы, инструменты, здания, еда, растения, животные, существа, транспорт, механизмы и артефакты. "
+            "Если можно выбрать между стихией/погодой и предметом, всегда выбирай предмет или существо. "
+            "Можно отходить от прямой физики и использовать фантазию, мифы, технологии, быт, культуру и случайные ассоциации. "
+            "Хороший стиль: грязь + жизнь = голем, электричество + металл = автомобиль, дерево + металл = меч, земля + вода = кувшин, огонь + камень = печь. "
+            "Плохой стиль: буря, ураган, вихрь, облако, туман, плазма, сфера, склейки частей исходных слов и суффиксы вроде -сфера, -грунт, -зем. "
             "Не используй однокоренные слова с исходными элементами и запрещёнными вариантами. "
             "Верни только JSON вида {\"result\":\"название\"}. Значение result должно быть русским существительным "
             "или коротким русским словосочетанием до трёх слов, "
@@ -341,6 +367,10 @@ class AlchemyGenerator:
             if _has_forbidden_root(result, rejected_results):
                 rejected_results = rejected_results + (result,)
                 last_error = AlchemyGenerationError(f"Результат однокоренной с уже связанными элементами: {result}.")
+                continue
+            if _is_boring_elemental_result(result):
+                rejected_results = rejected_results + (result,)
+                last_error = AlchemyGenerationError(f"Результат слишком похож на стихийное явление: {result}.")
                 continue
 
             return {
