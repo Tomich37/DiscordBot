@@ -361,7 +361,7 @@ class AlchemyCommands(commands.Cog):
                 )
                 self.logger.exception(f"Ошибка генерации алхимии: {error}")
                 await inter.followup.send(
-                    "Не получилось получить результат от GigaChat. Валюта возвращена. "
+                    "Ошибка. Валюта возвращена. "
                     f"Баланс: `{refund.get('balance', spend_result['balance'])}`.",
                     ephemeral=True,
                 )
