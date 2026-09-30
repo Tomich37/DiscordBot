@@ -1,4 +1,5 @@
 from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.engine import make_url
 from sqlalchemy import (
     BigInteger,
     Boolean,
@@ -24,7 +25,12 @@ load_dotenv()
 
 DATABASE_URL = os.getenv('DATABASE_URL')
 
-engine = create_engine(DATABASE_URL)
+# SQLAlchemy 2.1 использует psycopg 3 по умолчанию, а проект работает через psycopg2.
+database_url = make_url(DATABASE_URL)
+if database_url.drivername == "postgresql":
+    database_url = database_url.set(drivername="postgresql+psycopg2")
+
+engine = create_engine(database_url)
 Base = declarative_base()
 
 def wait_for_db():
