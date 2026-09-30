@@ -1,5 +1,8 @@
-import disnake
+import asyncio
 from datetime import datetime, timezone
+from io import BytesIO
+
+import disnake
 from disnake.ext import commands
 
 from app.modules.database import Database
@@ -19,6 +22,7 @@ BOT_ICON_URL = (
 )
 FOOTER_TEXT = "Made by the_usual_god"
 LEADERBOARD_PAGE_SIZE = 15
+ANONYMOUS_IMAGE_EXTENSIONS = {".gif", ".jpeg", ".jpg", ".png", ".webp"}
 
 
 async def send_interaction_message(inter, *args, **kwargs):
@@ -1309,6 +1313,7 @@ class SlashCommands(commands.Cog):
         self,
         inter: disnake.GuildCommandInteraction,
         message: str,
+        image: disnake.Attachment = None,
     ):
         """
         Отправка анонимного сообщения в этом канале.
@@ -1316,16 +1321,30 @@ class SlashCommands(commands.Cog):
         Parameters
         ----------
         message: Введите сообщение
+        image: Прикрепите изображение
         """
         try:
+            # Сразу подтверждаем команду: проверка базы и загрузка изображения могут занять больше трёх секунд.
+            await inter.response.defer(ephemeral=True)
+
             channel_id = inter.channel.id
-            anonimus_channels = self.db.get_all_anonimus_channel()
+            anonimus_channels = await asyncio.to_thread(
+                self.db.get_all_anonimus_channel
+            )
 
             if channel_id not in anonimus_channels:
-                return await inter.response.send_message(
-                    "Данный канал не поддерживает анонимные сообщения",
-                    ephemeral=True,
+                return await inter.edit_original_response(
+                    content="Данный канал не поддерживает анонимные сообщения",
                 )
+
+            image_extension = None
+            if image is not None:
+                image_extension = "." + image.filename.rsplit(".", 1)[-1].lower()
+                is_image = (image.content_type or "").lower().startswith("image/")
+                if not is_image or image_extension not in ANONYMOUS_IMAGE_EXTENSIONS:
+                    return await inter.edit_original_response(
+                        content="Поддерживаются изображения в форматах PNG, JPG, GIF и WEBP.",
+                    )
 
             embed = disnake.Embed(
                 title="Анонимуська",
@@ -1339,8 +1358,16 @@ class SlashCommands(commands.Cog):
             )
             embed.set_footer(text="Made by the_usual_god")
 
-            await inter.response.defer(ephemeral=True)
-            await inter.channel.send(embed=embed)
+            image_file = None
+            if image is not None:
+                image_bytes = await image.read(use_cached=True)
+                image_file = disnake.File(
+                    BytesIO(image_bytes),
+                    filename=f"anonymous_image{image_extension}",
+                )
+                embed.set_image(url=f"attachment://{image_file.filename}")
+
+            await inter.channel.send(embed=embed, file=image_file)
             await inter.delete_original_response()
 
             self.logger.info(
@@ -1349,9 +1376,17 @@ class SlashCommands(commands.Cog):
             )
         except Exception as e:
             error_msg = f"Ошибка при отправке анонимного сообщения: {e}"
-            await inter.response.send_message(error_msg, ephemeral=True)
             self.logger.exception(f"Ошибка в commands/slash_command/send_anonimus_channel: {e}")
             print(error_msg)
+            try:
+                if inter.response.is_done():
+                    await inter.edit_original_response(content=error_msg)
+                else:
+                    await inter.response.send_message(error_msg, ephemeral=True)
+            except (disnake.NotFound, disnake.InteractionTimedOut):
+                self.logger.warning(
+                    "Не удалось показать ошибку /anonimuska: взаимодействие уже истекло"
+                )
 
 
 def setup(bot, logger):
