@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timezone
 
 import disnake
@@ -21,6 +22,7 @@ BOT_ICON_URL = (
 )
 FOOTER_TEXT = "Made by the_usual_god"
 LEADERBOARD_PAGE_SIZE = 15
+ANONYMOUS_CHANNEL_CHECK_TIMEOUT_SECONDS = 1.5
 
 
 async def send_interaction_message(inter, *args, **kwargs):
@@ -1316,6 +1318,28 @@ class SlashCommands(commands.Cog):
         Открытие формы анонимного сообщения в текущем канале.
         """
         try:
+            try:
+                anonymous_channels = await asyncio.wait_for(
+                    asyncio.to_thread(self.db.get_all_anonimus_channel),
+                    timeout=ANONYMOUS_CHANNEL_CHECK_TIMEOUT_SECONDS,
+                )
+            except TimeoutError:
+                self.logger.warning(
+                    "Проверка канала для /anonimuska не завершилась за 1,5 секунды"
+                )
+                await inter.response.send_message(
+                    "Не удалось быстро проверить настройки канала. Попробуйте ещё раз позже.",
+                    ephemeral=True,
+                )
+                return
+
+            if inter.channel.id not in anonymous_channels:
+                await inter.response.send_message(
+                    "Данный канал не поддерживает анонимные сообщения.",
+                    ephemeral=True,
+                )
+                return
+
             await inter.response.send_modal(
                 AnonymousMessageModal(
                     db=self.db,
