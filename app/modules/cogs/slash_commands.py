@@ -1,9 +1,12 @@
-import disnake
+import asyncio
 from datetime import datetime, timezone
+
+import disnake
 from disnake.ext import commands
 
 from app.modules.database import Database
 from app.modules.menus.recruitment import RecruitmentView
+from app.modules.modals.anonymous_message_modal import AnonymousMessageModal
 from app.modules.modals.recruitment_setup_modal import RecruitmentSetupModal
 from app.modules.scripts import Scripts
 
@@ -19,6 +22,7 @@ BOT_ICON_URL = (
 )
 FOOTER_TEXT = "Made by the_usual_god"
 LEADERBOARD_PAGE_SIZE = 15
+ANONYMOUS_CHANNEL_CHECK_TIMEOUT_SECONDS = 1.5
 
 
 async def send_interaction_message(inter, *args, **kwargs):
@@ -1304,54 +1308,55 @@ class SlashCommands(commands.Cog):
     @commands.slash_command(
         name="anonimuska",
         description="Отправить анонимное сообщение в этом канале",
+        contexts=disnake.InteractionContextTypes(guild=True),
     )
     async def send_anonimus_channel(
         self,
         inter: disnake.GuildCommandInteraction,
-        message: str,
     ):
         """
-        Отправка анонимного сообщения в этом канале.
-
-        Parameters
-        ----------
-        message: Введите сообщение
+        Открытие формы анонимного сообщения в текущем канале.
         """
         try:
-            channel_id = inter.channel.id
-            anonimus_channels = self.db.get_all_anonimus_channel()
-
-            if channel_id not in anonimus_channels:
-                return await inter.response.send_message(
-                    "Данный канал не поддерживает анонимные сообщения",
+            try:
+                anonymous_channels = await asyncio.wait_for(
+                    asyncio.to_thread(self.db.get_all_anonimus_channel),
+                    timeout=ANONYMOUS_CHANNEL_CHECK_TIMEOUT_SECONDS,
+                )
+            except TimeoutError:
+                self.logger.warning(
+                    "Проверка канала для /anonimuska не завершилась за 1,5 секунды"
+                )
+                await inter.response.send_message(
+                    "Не удалось быстро проверить настройки канала. Попробуйте ещё раз позже.",
                     ephemeral=True,
                 )
+                return
 
-            embed = disnake.Embed(
-                title="Анонимуська",
-                description=message[:4096],
-                color=0x00008B,
-            )
-            embed.set_author(
-                name="Emiliabot",
-                url="https://discord.com/api/oauth2/authorize?client_id=602393416017379328&permissions=8&scope=bot+applications.commands",
-                icon_url="https://media.discordapp.net/attachments/1186903406196047954/1186903657904623637/avatar_2.png",
-            )
-            embed.set_footer(text="Made by the_usual_god")
+            if inter.channel.id not in anonymous_channels:
+                await inter.response.send_message(
+                    "Данный канал не поддерживает анонимные сообщения.",
+                    ephemeral=True,
+                )
+                return
 
-            await inter.response.defer(ephemeral=True)
-            await inter.channel.send(embed=embed)
-            await inter.delete_original_response()
-
-            self.logger.info(
-                f"Анонимное сообщение от {inter.author} (ID: {inter.author.id}) "
-                f"в канале {inter.channel} (ID: {channel_id}): {message[:100]}"
+            await inter.response.send_modal(
+                AnonymousMessageModal(
+                    db=self.db,
+                    logger=self.logger,
+                    channel_id=inter.channel.id,
+                    author_id=inter.author.id,
+                    interaction_id=inter.id,
+                )
             )
         except Exception as e:
-            error_msg = f"Ошибка при отправке анонимного сообщения: {e}"
-            await inter.response.send_message(error_msg, ephemeral=True)
             self.logger.exception(f"Ошибка в commands/slash_command/send_anonimus_channel: {e}")
-            print(error_msg)
+            print(f"Ошибка при открытии формы анонимного сообщения: {e}")
+            if not inter.response.is_done():
+                await inter.response.send_message(
+                    "Не удалось открыть форму анонимного сообщения.",
+                    ephemeral=True,
+                )
 
 
 def setup(bot, logger):
