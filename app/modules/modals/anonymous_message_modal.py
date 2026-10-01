@@ -13,6 +13,8 @@ ANONYMOUS_FILE_EXTENSIONS = (
     ANONYMOUS_IMAGE_EXTENSIONS | ANONYMOUS_DOCUMENT_EXTENSIONS
 )
 ANONYMOUS_MAX_FILES = 4
+ANONYMOUS_MODAL_TIMEOUT_SECONDS = 30 * 60
+ANONYMOUS_INTERACTION_ACK_TIMEOUT_SECONDS = 2.5
 
 
 class AnonymousMessageModal(disnake.ui.Modal):
@@ -28,6 +30,8 @@ class AnonymousMessageModal(disnake.ui.Modal):
         self.logger = logger
         self.channel_id = channel_id
         self.author_id = author_id
+        self._submission_lock = asyncio.Lock()
+        self._published = False
 
         components = [
             disnake.ui.Label(
@@ -57,23 +61,54 @@ class AnonymousMessageModal(disnake.ui.Modal):
             title="Анонимное сообщение",
             components=components,
             custom_id=f"anonymous_message:{interaction_id}",
+            timeout=ANONYMOUS_MODAL_TIMEOUT_SECONDS,
         )
 
     async def callback(self, interaction: disnake.ModalInteraction) -> None:
+        if self._submission_lock.locked() or self._published:
+            await self._show_duplicate_notice(interaction)
+            return
+
+        async with self._submission_lock:
+            await self._process_submission(interaction)
+
+    async def _process_submission(
+        self,
+        interaction: disnake.ModalInteraction,
+    ) -> None:
+        interaction_acknowledged = False
         try:
-            # Подтверждаем форму до запросов к базе и скачивания вложений.
-            await interaction.response.defer(ephemeral=True)
+            # При временном сбое Discord продолжаем публикацию обычным сообщением.
+            try:
+                await asyncio.wait_for(
+                    interaction.response.defer(ephemeral=True),
+                    timeout=ANONYMOUS_INTERACTION_ACK_TIMEOUT_SECONDS,
+                )
+                interaction_acknowledged = True
+            except (
+                TimeoutError,
+                disnake.NotFound,
+                disnake.InteractionTimedOut,
+            ) as error:
+                self.logger.warning(
+                    "Discord не подтвердил форму /anonimuska, "
+                    f"отправка продолжена без interaction-ответа: {error}"
+                )
 
             if interaction.author.id != self.author_id:
-                await interaction.edit_original_response(
-                    content="Эта форма была открыта другим пользователем.",
+                await self._edit_response(
+                    interaction,
+                    "Эта форма была открыта другим пользователем.",
+                    interaction_acknowledged,
                 )
                 return
 
             message = interaction.text_values.get("message", "").strip()
             if not message:
-                await interaction.edit_original_response(
-                    content="Анонимное сообщение не может быть пустым.",
+                await self._edit_response(
+                    interaction,
+                    "Анонимное сообщение не может быть пустым.",
+                    interaction_acknowledged,
                 )
                 return
 
@@ -81,15 +116,19 @@ class AnonymousMessageModal(disnake.ui.Modal):
                 self.db.get_all_anonimus_channel
             )
             if self.channel_id not in anonymous_channels:
-                await interaction.edit_original_response(
-                    content="Данный канал не поддерживает анонимные сообщения.",
+                await self._edit_response(
+                    interaction,
+                    "Данный канал не поддерживает анонимные сообщения.",
+                    interaction_acknowledged,
                 )
                 return
 
             target_channel = interaction.guild.get_channel(self.channel_id)
             if target_channel is None:
-                await interaction.edit_original_response(
-                    content="Не удалось найти канал для отправки сообщения.",
+                await self._edit_response(
+                    interaction,
+                    "Не удалось найти канал для отправки сообщения.",
+                    interaction_acknowledged,
                 )
                 return
 
@@ -101,10 +140,10 @@ class AnonymousMessageModal(disnake.ui.Modal):
                 not in ANONYMOUS_FILE_EXTENSIONS
             ]
             if invalid_files:
-                await interaction.edit_original_response(
-                    content=(
-                        "Поддерживаются файлы в форматах PNG, JPG, GIF, WEBP, PDF и TXT."
-                    ),
+                await self._edit_response(
+                    interaction,
+                    "Поддерживаются файлы в форматах PNG, JPG, GIF, WEBP, PDF и TXT.",
+                    interaction_acknowledged,
                 )
                 return
 
@@ -115,8 +154,10 @@ class AnonymousMessageModal(disnake.ui.Modal):
             ]
             if oversized_files:
                 size_limit_mb = interaction.guild.filesize_limit // (1024 * 1024)
-                await interaction.edit_original_response(
-                    content=f"Размер каждого файла не должен превышать {size_limit_mb} МБ.",
+                await self._edit_response(
+                    interaction,
+                    f"Размер каждого файла не должен превышать {size_limit_mb} МБ.",
+                    interaction_acknowledged,
                 )
                 return
 
@@ -127,7 +168,16 @@ class AnonymousMessageModal(disnake.ui.Modal):
             if files:
                 send_options["files"] = files
             await target_channel.send(**send_options)
-            await interaction.delete_original_response()
+            self._published = True
+
+            if interaction_acknowledged:
+                try:
+                    await interaction.delete_original_response()
+                except (disnake.NotFound, disnake.InteractionTimedOut):
+                    self.logger.warning(
+                        "Анонимное сообщение отправлено, но служебный ответ "
+                        "формы уже истёк"
+                    )
 
             self.logger.info(
                 f"Анонимное сообщение от {interaction.author} "
@@ -139,7 +189,7 @@ class AnonymousMessageModal(disnake.ui.Modal):
                 f"Ошибка в modals/anonymous_message_modal: {error}"
             )
             print(f"Ошибка при отправке анонимного сообщения: {error}")
-            await self._show_error(interaction)
+            await self._show_error(interaction, interaction_acknowledged)
 
     @staticmethod
     def _get_extension(filename: str) -> str:
@@ -195,17 +245,51 @@ class AnonymousMessageModal(disnake.ui.Modal):
 
         return embed
 
-    async def _show_error(self, interaction: disnake.ModalInteraction) -> None:
+    async def _edit_response(
+        self,
+        interaction: disnake.ModalInteraction,
+        message: str,
+        interaction_acknowledged: bool,
+    ) -> None:
+        if not interaction_acknowledged:
+            self.logger.warning(
+                "Не удалось показать ответ /anonimuska: взаимодействие уже истекло"
+            )
+            return
+
+        await interaction.edit_original_response(content=message)
+
+    async def _show_duplicate_notice(
+        self,
+        interaction: disnake.ModalInteraction,
+    ) -> None:
+        message = (
+            "Анонимное сообщение уже отправлено."
+            if self._published
+            else "Анонимное сообщение уже отправляется."
+        )
+        try:
+            await interaction.response.send_message(message, ephemeral=True)
+        except (disnake.NotFound, disnake.InteractionTimedOut):
+            self.logger.warning(
+                "Не удалось показать статус повторной отправки /anonimuska"
+            )
+
+    async def _show_error(
+        self,
+        interaction: disnake.ModalInteraction,
+        interaction_acknowledged: bool,
+    ) -> None:
         error_message = (
             "Не удалось отправить анонимное сообщение. Попробуйте ещё раз позже."
         )
         try:
-            if interaction.response.is_done():
+            if interaction_acknowledged:
                 await interaction.edit_original_response(content=error_message)
             else:
-                await interaction.response.send_message(
-                    error_message,
-                    ephemeral=True,
+                self.logger.warning(
+                    "Не удалось показать ошибку /anonimuska: "
+                    "взаимодействие уже истекло"
                 )
         except (disnake.NotFound, disnake.InteractionTimedOut):
             self.logger.warning(
