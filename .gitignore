@@ -4,3 +4,7 @@ config.ini
 **/logs
 venv
 *.service
+
+# Графы, отчёты, кэш и временные файлы Graphify
+graphify-out/
+.graphify_*
