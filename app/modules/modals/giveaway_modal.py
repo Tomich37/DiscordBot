@@ -1,12 +1,13 @@
 import disnake
 
-from app.modules.database import Database
+from app.modules.async_database import AsyncDatabase
 from app.modules.menus.giveaway import GiveawayFinishView
 
 
 class GiveawayModal(disnake.ui.Modal):
     def __init__(
         self,
+        db: AsyncDatabase,
         logger,
         channel_id: int,
         admin_channel_id: int,
@@ -18,7 +19,7 @@ class GiveawayModal(disnake.ui.Modal):
         self.admin_channel_id = admin_channel_id
         self.emoji_str = emoji_str.strip()
         self.creator_id = creator_id
-        self.db = Database()
+        self.db = db
 
         components = [
             disnake.ui.TextInput(
@@ -95,7 +96,7 @@ class GiveawayModal(disnake.ui.Modal):
             giveaway_message = await channel.send(embed=embed)
             await giveaway_message.add_reaction(self.emoji_str)
 
-            giveaway = self.db.create_giveaway(
+            giveaway = await self.db.create_giveaway(
                 guild_id=interaction.guild.id,
                 channel_id=channel.id,
                 message_id=giveaway_message.id,
@@ -111,7 +112,7 @@ class GiveawayModal(disnake.ui.Modal):
                 embed=admin_embed,
                 view=GiveawayFinishView(self.logger),
             )
-            self.db.update_giveaway_admin_message(giveaway.id, admin_message.id)
+            await self.db.update_giveaway_admin_message(giveaway.id, admin_message.id)
 
             await interaction.response.send_message(
                 f"Розыгрыш создан в канале {channel.mention}.\n"
@@ -120,7 +121,7 @@ class GiveawayModal(disnake.ui.Modal):
             )
         except Exception as e:
             if giveaway:
-                self.db.finish_giveaway(giveaway.id, [])
+                await self.db.finish_giveaway(giveaway.id, [])
             if admin_message:
                 await admin_message.delete()
             if giveaway_message:

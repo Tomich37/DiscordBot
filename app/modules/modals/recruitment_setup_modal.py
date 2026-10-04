@@ -1,6 +1,6 @@
 import disnake
 
-from app.modules.database import Database
+from app.modules.async_database import AsyncDatabase
 from app.modules.menus.recruitment import RecruitmentView
 
 
@@ -21,6 +21,7 @@ DEFAULT_RECRUITMENT_QUESTIONS = [
 class RecruitmentSetupModal(disnake.ui.Modal):
     def __init__(
         self,
+        db: AsyncDatabase,
         logger,
         requests_channel_id: int,
         panel_channel_id: int,
@@ -30,7 +31,7 @@ class RecruitmentSetupModal(disnake.ui.Modal):
         self.requests_channel_id = requests_channel_id
         self.panel_channel_id = panel_channel_id
         self.position_count = position_count
-        self.db = Database()
+        self.db = db
 
         components = [
             disnake.ui.TextInput(
@@ -80,15 +81,15 @@ class RecruitmentSetupModal(disnake.ui.Modal):
                 )
                 return
 
-            self.db.create_update_recruitment_channel(
+            await self.db.create_update_recruitment_channel(
                 guild_id=interaction.guild.id,
                 channel_id=requests_channel.id,
             )
-            self.db.replace_recruitment_positions(interaction.guild.id, positions)
+            await self.db.replace_recruitment_positions(interaction.guild.id, positions)
 
             # Если вопросы ещё не настроены, оставляем рабочий базовый шаблон анкеты.
-            if not self.db.get_recruitment_questions(interaction.guild.id):
-                self.db.replace_recruitment_questions(
+            if not await self.db.get_recruitment_questions(interaction.guild.id):
+                await self.db.replace_recruitment_questions(
                     interaction.guild.id,
                     DEFAULT_RECRUITMENT_QUESTIONS,
                 )
@@ -113,9 +114,9 @@ class RecruitmentSetupModal(disnake.ui.Modal):
 
             panel_message = await panel_channel.send(
                 embed=embed,
-                view=RecruitmentView(self.logger, positions),
+                view=RecruitmentView(self.db, self.logger, positions),
             )
-            self.db.create_update_recruitment_message(
+            await self.db.create_update_recruitment_message(
                 guild_id=interaction.guild.id,
                 message_id=panel_message.id,
             )

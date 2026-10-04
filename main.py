@@ -10,6 +10,7 @@ from disnake.ext import commands
 from disnake import ApplicationCommandInteraction
 
 from app.modules.logger import SetLogs
+from app.modules.async_database import AsyncDatabase
 from app.modules.database import Database
 from app.modules.messages import Messages
 from app.modules.scripts import Scripts
@@ -139,11 +140,13 @@ class Bot(commands.Bot):
             help_command=None,
         )
         self.logger = logger
-        self.scripts = Scripts(logger, self)
         self.db = Database()
+        self.async_db = AsyncDatabase(self.db)
+        self.scripts = Scripts(logger, self)
         self.scheduler = AsyncIOScheduler()
         self.mi_user_id = MI_USER_ID
         self.user_message_counters = defaultdict(int)
+        self.channel_message_counters = defaultdict(int)
         self.user_message_counters_lock = asyncio.Lock()
         self.user_stats_flush_task = None
 
@@ -173,7 +176,7 @@ class Bot(commands.Bot):
             self.scheduler.start()
             self.scheduler_running = True
         if not hasattr(self, "voice_sessions_initialized"):
-            self._initialize_active_voice_sessions()
+            await self._initialize_active_voice_sessions()
             self.voice_sessions_initialized = True
         if not self.user_stats_flush_task or self.user_stats_flush_task.done():
             self.user_stats_flush_task = asyncio.create_task(self._flush_user_stats_loop())
@@ -189,12 +192,17 @@ class Bot(commands.Bot):
             except asyncio.CancelledError:
                 pass
 
-        await self.flush_user_message_stats()
+        await self.flush_message_stats()
+        await self.async_db.dispose()
         await super().close()
 
     async def queue_user_message_stat(self, guild_id: int, user_id: int):
         async with self.user_message_counters_lock:
             self.user_message_counters[(guild_id, user_id)] += 1
+
+    async def queue_channel_message_stat(self, channel_id: int, statistic_date):
+        async with self.user_message_counters_lock:
+            self.channel_message_counters[(channel_id, statistic_date)] += 1
 
     async def get_pending_user_message_count(self, guild_id: int, user_id: int) -> int:
         async with self.user_message_counters_lock:
@@ -217,25 +225,49 @@ class Bot(commands.Bot):
             return
 
         try:
-            await asyncio.to_thread(self.db.bulk_increment_user_message_counts, counters)
+            await self.async_db.bulk_increment_user_message_counts(counters)
         except Exception as e:
             async with self.user_message_counters_lock:
                 for key, count in counters.items():
                     self.user_message_counters[key] += count
             self.logger.exception(f"Ошибка сохранения пользовательской статистики сообщений: {e}")
 
+    async def flush_channel_message_stats(self):
+        async with self.user_message_counters_lock:
+            counters = dict(self.channel_message_counters)
+            self.channel_message_counters.clear()
+
+        if not counters:
+            return
+
+        try:
+            await self.async_db.bulk_increment_channel_message_counts(counters)
+        except Exception as error:
+            async with self.user_message_counters_lock:
+                for key, count in counters.items():
+                    self.channel_message_counters[key] += count
+            self.logger.exception(
+                f"Ошибка сохранения статистики сообщений по каналам: {error}"
+            )
+
+    async def flush_message_stats(self):
+        await asyncio.gather(
+            self.flush_user_message_stats(),
+            self.flush_channel_message_stats(),
+        )
+
     async def _flush_user_stats_loop(self):
         while not self.is_closed():
             await asyncio.sleep(self.USER_STATS_FLUSH_INTERVAL_SECONDS)
-            await self.flush_user_message_stats()
+            await self.flush_message_stats()
 
-    def _initialize_active_voice_sessions(self):
+    async def _initialize_active_voice_sessions(self):
         for guild in self.guilds:
-            self.db.reset_open_voice_sessions(guild.id)
+            await self.async_db.reset_open_voice_sessions(guild.id)
             for channel in guild.voice_channels:
                 for member in channel.members:
                     if not member.bot:
-                        self.db.start_user_voice_session(
+                        await self.async_db.start_user_voice_session(
                             guild_id=guild.id,
                             user_id=member.id,
                             channel_id=channel.id,
@@ -276,7 +308,7 @@ class Bot(commands.Bot):
 
         try:
             if before_channel is None and after_channel is not None:
-                self.db.start_user_voice_session(
+                await self.async_db.start_user_voice_session(
                     guild_id=member.guild.id,
                     user_id=member.id,
                     channel_id=after_channel.id,
@@ -284,7 +316,7 @@ class Bot(commands.Bot):
                 return
 
             if before_channel is not None and after_channel is None:
-                self.db.finish_user_voice_session(
+                await self.async_db.finish_user_voice_session(
                     guild_id=member.guild.id,
                     user_id=member.id,
                 )
@@ -292,7 +324,7 @@ class Bot(commands.Bot):
                 return
 
             if before_channel is not None and after_channel is not None:
-                self.db.start_user_voice_session(
+                await self.async_db.start_user_voice_session(
                     guild_id=member.guild.id,
                     user_id=member.id,
                     channel_id=after_channel.id,

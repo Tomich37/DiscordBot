@@ -10,7 +10,7 @@ from app.modules.alchemy_service import (
     normalize_alchemy_pair,
     validate_alchemy_word,
 )
-from app.modules.database import Database
+from app.modules.async_database import AsyncDatabase
 
 
 BASE_ALCHEMY_ELEMENTS = [
@@ -134,14 +134,14 @@ class AlchemyPaginationView(disnake.ui.View):
 
 
 class AlchemyInventoryView(AlchemyPaginationView):
-    def __init__(self, db: Database, guild_id: int, user_id: int, total_pages: int) -> None:
+    def __init__(self, db: AsyncDatabase, guild_id: int, user_id: int, total_pages: int) -> None:
         self.db = db
         self.guild_id = guild_id
         self.user_id = user_id
         super().__init__(author_id=user_id, total_pages=total_pages)
 
     async def refresh_page(self, interaction: disnake.MessageInteraction) -> None:
-        inventory = self.db.get_alchemy_inventory_page(
+        inventory = await self.db.get_alchemy_inventory_page(
             guild_id=self.guild_id,
             user_id=self.user_id,
             page=self.current_page,
@@ -154,13 +154,13 @@ class AlchemyInventoryView(AlchemyPaginationView):
 
 
 class AlchemyRecipesView(AlchemyPaginationView):
-    def __init__(self, db: Database, guild: disnake.Guild, author_id: int, total_pages: int) -> None:
+    def __init__(self, db: AsyncDatabase, guild: disnake.Guild, author_id: int, total_pages: int) -> None:
         self.db = db
         self.guild = guild
         super().__init__(author_id=author_id, total_pages=total_pages)
 
     async def refresh_page(self, interaction: disnake.MessageInteraction) -> None:
-        recipes = self.db.get_discovered_alchemy_recipes_page(
+        recipes = await self.db.get_discovered_alchemy_recipes_page(
             guild_id=self.guild.id,
             page=self.current_page,
             page_size=RECIPES_PAGE_SIZE,
@@ -175,7 +175,7 @@ class AlchemyCommands(commands.Cog):
     def __init__(self, bot, logger):
         self.bot = bot
         self.logger = logger
-        self.db = Database()
+        self.db = bot.async_db
         self.generator = AlchemyGenerator()
         self.start_balance = _read_positive_int_env("ALCHEMY_START_BALANCE", 50)
         self.daily_reward = _read_daily_reward(25)
@@ -188,7 +188,7 @@ class AlchemyCommands(commands.Cog):
     )
     async def alchemy_start(self, inter: disnake.GuildCommandInteraction):
         try:
-            result = self.db.start_alchemy_player(
+            result = await self.db.start_alchemy_player(
                 guild_id=inter.guild.id,
                 user_id=inter.author.id,
                 start_balance=self.start_balance,
@@ -218,7 +218,7 @@ class AlchemyCommands(commands.Cog):
     )
     async def daily(self, inter: disnake.GuildCommandInteraction):
         try:
-            result = self.db.claim_daily_reward(
+            result = await self.db.claim_daily_reward(
                 guild_id=inter.guild.id,
                 user_id=inter.author.id,
                 reward=self.daily_reward,
@@ -248,7 +248,7 @@ class AlchemyCommands(commands.Cog):
     )
     async def balance(self, inter: disnake.GuildCommandInteraction):
         try:
-            profile = self.db.get_alchemy_profile(inter.guild.id, inter.author.id)
+            profile = await self.db.get_alchemy_profile(inter.guild.id, inter.author.id)
             await inter.response.send_message(
                 f"Ваш баланс: `{profile['balance']}`.",
                 ephemeral=True,
@@ -279,7 +279,7 @@ class AlchemyCommands(commands.Cog):
                 return
 
             left_element, right_element = normalize_alchemy_pair(left_input, right_input)
-            inventory_check = self.db.has_alchemy_elements(
+            inventory_check = await self.db.has_alchemy_elements(
                 guild_id=inter.guild.id,
                 user_id=inter.author.id,
                 element_names=list({left_element, right_element}),
@@ -296,7 +296,7 @@ class AlchemyCommands(commands.Cog):
                 )
                 return
 
-            spend_result = self.db.spend_alchemy_currency(
+            spend_result = await self.db.spend_alchemy_currency(
                 guild_id=inter.guild.id,
                 user_id=inter.author.id,
                 amount=self.combine_cost,
@@ -312,9 +312,9 @@ class AlchemyCommands(commands.Cog):
                 )
                 return
 
-            known_recipe = self.db.get_alchemy_recipe(inter.guild.id, left_element, right_element)
+            known_recipe = await self.db.get_alchemy_recipe(inter.guild.id, left_element, right_element)
             if known_recipe:
-                discovery_result = self.db.discover_known_alchemy_recipe_on_guild(
+                discovery_result = await self.db.discover_known_alchemy_recipe_on_guild(
                     guild_id=inter.guild.id,
                     user_id=inter.author.id,
                     recipe_id=known_recipe["id"],
@@ -341,11 +341,11 @@ class AlchemyCommands(commands.Cog):
                 return
 
             try:
-                related_elements = self.db.get_related_alchemy_element_names(
+                related_elements = await self.db.get_related_alchemy_element_names(
                     [left_element, right_element],
                     max_depth=ALCHEMY_FORBIDDEN_CHAIN_DEPTH,
                 )
-                known_elements = self.db.get_known_alchemy_element_names()
+                known_elements = await self.db.get_known_alchemy_element_names()
                 generated = await self.generator.generate_result(
                     left_element,
                     right_element,
@@ -353,7 +353,7 @@ class AlchemyCommands(commands.Cog):
                     unavailable_results=known_elements,
                 )
             except (AlchemyConfigError, AlchemyGenerationError, Exception) as error:
-                refund = self.db.refund_alchemy_currency(
+                refund = await self.db.refund_alchemy_currency(
                     guild_id=inter.guild.id,
                     user_id=inter.author.id,
                     amount=self.combine_cost,
@@ -367,7 +367,7 @@ class AlchemyCommands(commands.Cog):
                 )
                 return
 
-            discovery = self.db.create_alchemy_discovery(
+            discovery = await self.db.create_alchemy_discovery(
                 guild_id=inter.guild.id,
                 user_id=inter.author.id,
                 left_element=left_element,
@@ -413,7 +413,7 @@ class AlchemyCommands(commands.Cog):
         inter: disnake.GuildCommandInteraction,
     ):
         try:
-            inventory = self.db.get_alchemy_inventory_page(
+            inventory = await self.db.get_alchemy_inventory_page(
                 guild_id=inter.guild.id,
                 user_id=inter.author.id,
                 page=0,
@@ -448,7 +448,7 @@ class AlchemyCommands(commands.Cog):
         inter: disnake.GuildCommandInteraction,
     ):
         try:
-            recipes = self.db.get_discovered_alchemy_recipes_page(
+            recipes = await self.db.get_discovered_alchemy_recipes_page(
                 guild_id=inter.guild.id,
                 page=0,
                 page_size=RECIPES_PAGE_SIZE,

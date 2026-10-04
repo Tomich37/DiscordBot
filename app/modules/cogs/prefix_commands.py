@@ -5,7 +5,6 @@ from pathlib import Path
 import disnake
 from disnake.ext import commands
 
-from app.modules.database import Database
 from app.modules.logger import fix_text_mojibake
 
 
@@ -22,7 +21,7 @@ class PrefixCommands(commands.Cog):
     def __init__(self, bot, logger):
         self.bot = bot
         self.logger = logger
-        self.db = Database()
+        self.db = bot.async_db
 
     async def cog_check(self, ctx):
         return self.bot.is_mi_user(ctx.author)
@@ -137,7 +136,7 @@ class PrefixCommands(commands.Cog):
 
         try:
             is_active = status in {"start", "on", "enable"}
-            self.db.create_update_channel_statistic(ctx.guild.id, channel.id, is_active)
+            await self.db.create_update_channel_statistic(ctx.guild.id, channel.id, is_active)
             if is_active:
                 await self._send_action_notice(ctx, f"Статистика включена для канала {channel.mention}.")
             else:
@@ -195,7 +194,7 @@ class PrefixCommands(commands.Cog):
             return
 
         try:
-            result = self.db.grant_alchemy_currency(
+            result = await self.db.grant_alchemy_currency(
                 guild_id=ctx.guild.id,
                 user_id=user_id,
                 amount=amount,
