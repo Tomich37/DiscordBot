@@ -9,9 +9,6 @@ from pathlib import Path
 import disnake
 from moviepy import VideoFileClip, vfx
 
-from app.modules.database import Database
-
-
 class Scripts:
     MAX_CONCURRENT_CONVERSIONS = 5
     MAX_GIF_DURATION_SECONDS = 10
@@ -25,7 +22,7 @@ class Scripts:
     def __init__(self, logger, bot) -> None:
         self.logger = logger
         self.bot = bot
-        self.db = Database
+        self.db = bot.async_db
         self._temp_dir = Path(os.path.dirname(os.path.abspath(__file__))) / "temp"
         self._temp_dir.mkdir(parents=True, exist_ok=True)
 
@@ -36,8 +33,7 @@ class Scripts:
                 self.logger.warning(f"Канал с id {channel_id} не найден.")
                 return
 
-            db = Database()
-            contest_messages = db.get_contest_messages(contest_id)
+            contest_messages = await self.db.get_contest_messages(contest_id)
             if not contest_messages:
                 await channel.send("В этом конкурсе пока нет постов, привязанных к текущему запуску.")
                 return
@@ -316,10 +312,10 @@ class Scripts:
     async def send_daily_statistics(self):
         try:
             yesterday = date.today() - timedelta(days=1)
-            active_channels = self.db.get_all_statistics_channel()
+            active_channels = await self.db.get_all_statistics_channel()
 
             for channel_id in active_channels:
-                stats = self.db.get_yesterday_statistic(
+                stats = await self.db.get_yesterday_statistic(
                     channel_id=channel_id,
                     date=yesterday,
                 )

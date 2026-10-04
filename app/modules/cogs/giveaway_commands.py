@@ -3,7 +3,6 @@ import random
 import disnake
 from disnake.ext import commands
 
-from app.modules.database import Database
 from app.modules.menus.giveaway import GiveawayFinishView
 from app.modules.modals.giveaway_modal import GiveawayModal
 
@@ -12,7 +11,7 @@ class GiveawayCommands(commands.Cog):
     def __init__(self, bot, logger):
         self.bot = bot
         self.logger = logger
-        self.db = Database()
+        self.db = bot.async_db
 
     @commands.slash_command(
         name="giveaway_create",
@@ -38,6 +37,7 @@ class GiveawayCommands(commands.Cog):
         try:
             await inter.response.send_modal(
                 GiveawayModal(
+                    db=self.db,
                     logger=self.logger,
                     channel_id=channel.id,
                     admin_channel_id=inter.channel.id,
@@ -62,7 +62,7 @@ class GiveawayCommands(commands.Cog):
         try:
             await inter.response.defer(ephemeral=True)
 
-            giveaway = self.db.get_active_giveaway_by_admin_message(
+            giveaway = await self.db.get_active_giveaway_by_admin_message(
                 guild_id=inter.guild.id,
                 admin_channel_id=admin_channel.id,
                 admin_message_id=admin_message_id,
@@ -84,7 +84,7 @@ class GiveawayCommands(commands.Cog):
 
             participant_ids = await self._sync_participants_from_reactions(channel, giveaway)
             winners = self._select_winners(participant_ids, giveaway.winner_count)
-            giveaway = self.db.finish_giveaway(giveaway.id, winners)
+            giveaway = await self.db.finish_giveaway(giveaway.id, winners)
 
             if winners:
                 winners_text = "\n".join(
@@ -131,7 +131,7 @@ class GiveawayCommands(commands.Cog):
         if should_add and payload.member and payload.member.bot:
             return
 
-        giveaway = self.db.get_active_giveaway_by_message(
+        giveaway = await self.db.get_active_giveaway_by_message(
             guild_id=payload.guild_id,
             channel_id=payload.channel_id,
             message_id=payload.message_id,
@@ -140,23 +140,23 @@ class GiveawayCommands(commands.Cog):
             return
 
         if should_add:
-            self.db.add_giveaway_participant(giveaway.id, payload.user_id)
+            await self.db.add_giveaway_participant(giveaway.id, payload.user_id)
         else:
-            self.db.deactivate_giveaway_participant(giveaway.id, payload.user_id)
+            await self.db.deactivate_giveaway_participant(giveaway.id, payload.user_id)
         await self._update_admin_panel(giveaway)
 
     async def _sync_participants_from_reactions(self, channel, giveaway) -> list[int]:
         try:
             message = await channel.fetch_message(giveaway.message_id)
         except disnake.NotFound:
-            return self.db.get_active_giveaway_participant_ids(giveaway.id)
+            return await self.db.get_active_giveaway_participant_ids(giveaway.id)
 
         reaction = next(
             (item for item in message.reactions if str(item.emoji) == giveaway.emoji_str),
             None,
         )
         if not reaction:
-            return self.db.sync_giveaway_participants(giveaway.id, [])
+            return await self.db.sync_giveaway_participants(giveaway.id, [])
 
         participant_ids = []
         async for user in reaction.users():
@@ -164,7 +164,7 @@ class GiveawayCommands(commands.Cog):
                 continue
 
             participant_ids.append(user.id)
-        return self.db.sync_giveaway_participants(giveaway.id, participant_ids)
+        return await self.db.sync_giveaway_participants(giveaway.id, participant_ids)
 
     @staticmethod
     def _select_winners(participant_ids: list[int], winner_count: int) -> list[int]:
@@ -187,7 +187,7 @@ class GiveawayCommands(commands.Cog):
                 return
 
             message = await channel.fetch_message(giveaway.admin_message_id)
-            stats = self.db.get_giveaway_stats(giveaway.id)
+            stats = await self.db.get_giveaway_stats(giveaway.id)
             embed = self._build_admin_embed(
                 giveaway,
                 active_count=stats["active_count"],

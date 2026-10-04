@@ -1,8 +1,9 @@
 disnake==2.12.1
 gigachat
 configparser
-sqlalchemy
+sqlalchemy[asyncio]
 psycopg2
+asyncpg
 python-dotenv
 matplotlib
 moviepy

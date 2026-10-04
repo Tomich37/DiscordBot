@@ -4,7 +4,6 @@ from datetime import datetime, timezone
 import disnake
 from disnake.ext import commands
 
-from app.modules.database import Database
 from app.modules.menus.recruitment import RecruitmentView
 from app.modules.modals.anonymous_message_modal import AnonymousMessageModal
 from app.modules.modals.recruitment_setup_modal import RecruitmentSetupModal
@@ -98,7 +97,7 @@ class SlashCommands(commands.Cog):
     def __init__(self, bot, logger):
         self.bot = bot
         self.logger = logger
-        self.db = Database()
+        self.db = bot.async_db
         self.sc = Scripts(logger, bot)
 
     convert_formats = commands.option_enum({"MOV": "mov", "GIF (до 10 сек)": "gif"})
@@ -274,7 +273,7 @@ class SlashCommands(commands.Cog):
         return max(elapsed_seconds / 86400, 1)
 
     async def _get_profile_stats(self, member: disnake.Member) -> dict:
-        stats = self.db.get_user_stats(member.guild.id, member.id)
+        stats = await self.db.get_user_stats(member.guild.id, member.id)
         total_voice_seconds = stats["total_voice_seconds"]
         pending_messages = 0
 
@@ -351,7 +350,7 @@ class SlashCommands(commands.Cog):
     async def _get_guild_stats_with_pending_messages(self, guild_id: int) -> dict[int, dict]:
         stats_by_user_id = {
             stats["user_id"]: stats
-            for stats in self.db.get_guild_user_stats(guild_id)
+            for stats in await self.db.get_guild_user_stats(guild_id)
         }
 
         get_pending_counts = getattr(self.bot, "get_pending_guild_message_counts", None)
@@ -581,7 +580,7 @@ class SlashCommands(commands.Cog):
         username = str(member)
         stats = await self._get_profile_stats(member)
         ranks = await self._get_profile_ranks(member)
-        alchemy_stats = self.db.get_alchemy_profile(member.guild.id, member.id)
+        alchemy_stats = await self.db.get_alchemy_profile(member.guild.id, member.id)
 
         embed = disnake.Embed(
             title=f"Профиль: {display_name}",
@@ -1085,20 +1084,20 @@ class SlashCommands(commands.Cog):
             is_start = status == "start"
 
             if is_start:
-                contest = self.db.start_contest_run(
+                contest = await self.db.start_contest_run(
                     guild_id=guild_id,
                     channel_id=channel_id,
                     contest_name=contest_name,
                     emoji_str=emoji_str,
                 )
-                self.db.create_update_contest(guild_id, channel_id, emoji_str, True)
+                await self.db.create_update_contest(guild_id, channel_id, emoji_str, True)
                 await inter.send(
                     f"Конкурс `{contest.contest_name}` в канале <#{channel_id}> активирован. "
                     f"Выбранное эмодзи: {emoji_str}",
                     ephemeral=False,
                 )
             else:
-                contest = self.db.stop_contest_run(
+                contest = await self.db.stop_contest_run(
                     guild_id=guild_id,
                     channel_id=channel_id,
                     contest_name=contest_name,
@@ -1117,8 +1116,8 @@ class SlashCommands(commands.Cog):
                     contest_id=contest.id,
                     top_count=top_count,
                 )
-                if not self.db.get_active_contests_for_channel(guild_id, channel_id):
-                    self.db.create_update_contest(guild_id, channel_id, contest.emoji_str, False)
+                if not await self.db.get_active_contests_for_channel(guild_id, channel_id):
+                    await self.db.create_update_contest(guild_id, channel_id, contest.emoji_str, False)
                 await inter.send(
                     f"Конкурс `{contest.contest_name}` в канале <#{channel_id}> завершён.",
                     ephemeral=False,
@@ -1200,7 +1199,7 @@ class SlashCommands(commands.Cog):
             channel_id = channel.id
             is_active = status == "start"
 
-            self.db.create_update_channel_statistic(guild_id, channel_id, is_active)
+            await self.db.create_update_channel_statistic(guild_id, channel_id, is_active)
 
             if is_active:
                 await inter.send(
@@ -1248,6 +1247,7 @@ class SlashCommands(commands.Cog):
             target_panel_channel = panel_channel or inter.channel
             await inter.response.send_modal(
                 RecruitmentSetupModal(
+                    db=self.db,
                     logger=self.logger,
                     requests_channel_id=requests_channel.id,
                     panel_channel_id=target_panel_channel.id,
@@ -1288,7 +1288,7 @@ class SlashCommands(commands.Cog):
             channel_id = channel.id
             is_active = action == "add"
 
-            self.db.create_update_channel_anonimus(guild_id, channel_id, is_active)
+            await self.db.create_update_channel_anonimus(guild_id, channel_id, is_active)
 
             if is_active:
                 await inter.send(
@@ -1320,7 +1320,7 @@ class SlashCommands(commands.Cog):
         try:
             try:
                 anonymous_channels = await asyncio.wait_for(
-                    asyncio.to_thread(self.db.get_all_anonimus_channel),
+                    self.db.get_all_anonimus_channel(),
                     timeout=ANONYMOUS_CHANNEL_CHECK_TIMEOUT_SECONDS,
                 )
             except TimeoutError:

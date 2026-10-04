@@ -4,7 +4,7 @@ from pathlib import Path
 
 import disnake
 
-from app.modules.database import Database
+from app.modules.async_database import AsyncDatabase
 
 
 ANONYMOUS_IMAGE_EXTENSIONS = {".gif", ".jpeg", ".jpg", ".png", ".webp"}
@@ -20,7 +20,7 @@ ANONYMOUS_INTERACTION_ACK_TIMEOUT_SECONDS = 2.5
 class AnonymousMessageModal(disnake.ui.Modal):
     def __init__(
         self,
-        db: Database,
+        db: AsyncDatabase,
         logger,
         channel_id: int,
         author_id: int,
@@ -112,9 +112,7 @@ class AnonymousMessageModal(disnake.ui.Modal):
                 )
                 return
 
-            anonymous_channels = await asyncio.to_thread(
-                self.db.get_all_anonimus_channel
-            )
+            anonymous_channels = await self.db.get_all_anonimus_channel()
             if self.channel_id not in anonymous_channels:
                 await self._edit_response(
                     interaction,

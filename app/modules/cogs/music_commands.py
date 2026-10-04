@@ -106,7 +106,7 @@ class MusicControlView(disnake.ui.View):
         if not voice_client:
             return
 
-        message = self.cog.previous_track(interaction.guild, voice_client, interaction.author.id)
+        message = await self.cog.previous_track(interaction.guild, voice_client, interaction.author.id)
         await interaction.response.send_message(message, ephemeral=True)
 
     @disnake.ui.button(label="⏯", style=disnake.ButtonStyle.primary, custom_id="music_pause_resume")
@@ -133,7 +133,7 @@ class MusicControlView(disnake.ui.View):
         if not voice_client or interaction.guild is None:
             return
 
-        message = self.cog.stop_music(interaction.guild, voice_client, interaction.author.id)
+        message = await self.cog.stop_music(interaction.guild, voice_client, interaction.author.id)
         await interaction.response.send_message(message, ephemeral=True)
 
 
@@ -144,7 +144,6 @@ class MusicQueueView(disnake.ui.View):
         self.guild_id = guild_id
         self.page = page
         super().__init__(timeout=180)
-        self._sync_buttons()
 
     async def interaction_check(self, interaction: disnake.MessageInteraction) -> bool:
         if interaction.author.id == self.author_id:
@@ -156,8 +155,8 @@ class MusicQueueView(disnake.ui.View):
         )
         return False
 
-    def _sync_buttons(self) -> None:
-        page_data = self.cog.bot.db.get_music_playlist_page(
+    async def _sync_buttons(self) -> dict:
+        page_data = await self.cog.bot.async_db.get_music_playlist_page(
             self.guild_id,
             self.author_id,
             self.page,
@@ -167,13 +166,15 @@ class MusicQueueView(disnake.ui.View):
         total_pages = page_data["total_pages"]
         self.previous_page.disabled = total_pages <= 1 or self.page == 0
         self.next_page.disabled = total_pages <= 1 or self.page >= total_pages - 1
+        return page_data
 
     async def _show_current_page(self, interaction: disnake.MessageInteraction) -> None:
-        self._sync_buttons()
-        embed = self.cog.build_queue_embed(
+        page_data = await self._sync_buttons()
+        embed = await self.cog.build_queue_embed(
             interaction.guild,
             self.author_id,
             self.page,
+            page_data=page_data,
         )
         await interaction.response.edit_message(embed=embed, view=self)
 
@@ -197,7 +198,7 @@ class MusicCommands(commands.Cog):
         self.playlist_ytdl = yt_dlp.YoutubeDL(YTDL_PLAYLIST_OPTIONS)
         self.ffmpeg_executable = _get_ffmpeg_executable()
         self.guild_states: dict[int, GuildMusicState] = {}
-        self.bot.db.reset_music_playing_tracks()
+        asyncio.create_task(self.bot.async_db.reset_music_playing_tracks())
         self.logger.debug(
             "Музыкальный cog загружен | ffmpeg: %s | DAVE: %s | yt-dlp options: %s",
             self.ffmpeg_executable,
@@ -553,12 +554,12 @@ class MusicCommands(commands.Cog):
         self.logger.info("Музыка: skip | user=%s guild=%s", user_id, guild.id)
         return "Трек пропущен."
 
-    def previous_track(self, guild: disnake.Guild, voice_client: disnake.VoiceClient, user_id: int) -> str:
+    async def previous_track(self, guild: disnake.Guild, voice_client: disnake.VoiceClient, user_id: int) -> str:
         state = self._get_state(guild.id)
         if not state.current or not (voice_client.is_playing() or voice_client.is_paused()):
             return "Сейчас нечего запускать сначала."
 
-        self.bot.db.rewind_music_track(state.current.db_track_id)
+        await self.bot.async_db.rewind_music_track(state.current.db_track_id)
         state.stop_reason = "previous"
         voice_client.stop()
         self.logger.info(
@@ -582,13 +583,16 @@ class MusicCommands(commands.Cog):
 
         return "Сейчас ничего не играет."
 
-    def stop_music(self, guild: disnake.Guild, voice_client: disnake.VoiceClient, user_id: int) -> str:
+    async def stop_music(self, guild: disnake.Guild, voice_client: disnake.VoiceClient, user_id: int) -> str:
         state = self._get_state(guild.id)
         current_owner_id = state.owner_id
         removed_tracks = 0
         should_clear_playlist = current_owner_id is None or current_owner_id == user_id
         if should_clear_playlist:
-            removed_tracks = self.bot.db.clear_music_playlist(guild.id, current_owner_id or user_id)
+            removed_tracks = await self.bot.async_db.clear_music_playlist(
+                guild.id,
+                current_owner_id or user_id,
+            )
 
         state.current = None
 
@@ -622,10 +626,22 @@ class MusicCommands(commands.Cog):
             channel_id,
         )
 
-    def build_queue_embed(self, guild: disnake.Guild, user_id: int, page: int = 0) -> disnake.Embed:
+    async def build_queue_embed(
+        self,
+        guild: disnake.Guild,
+        user_id: int,
+        page: int = 0,
+        page_data: dict | None = None,
+    ) -> disnake.Embed:
         state = self._get_state(guild.id)
-        page_data = self.bot.db.get_music_playlist_page(guild.id, user_id, page, QUEUE_PAGE_SIZE)
-        playlist_stats = self.bot.db.get_music_playlist_stats(guild.id, user_id)
+        if page_data is None:
+            page_data = await self.bot.async_db.get_music_playlist_page(
+                guild.id,
+                user_id,
+                page,
+                QUEUE_PAGE_SIZE,
+            )
+        playlist_stats = await self.bot.async_db.get_music_playlist_stats(guild.id, user_id)
 
         lines = []
         if state.current:
@@ -676,7 +692,7 @@ class MusicCommands(commands.Cog):
         requested_by = f"<@{state.owner_id}>"
         track = None
         while track is None:
-            db_track = self.bot.db.get_next_music_track(guild.id, state.owner_id)
+            db_track = await self.bot.async_db.get_next_music_track(guild.id, state.owner_id)
             if not db_track:
                 self.logger.debug(
                     "Музыка: в БД нет следующих треков | guild=%s owner=%s",
@@ -687,10 +703,14 @@ class MusicCommands(commands.Cog):
                 return
 
             try:
-                self.bot.db.mark_music_track_status(db_track["id"], "playing")
+                await self.bot.async_db.mark_music_track_status(db_track["id"], "playing")
                 track = await self._prepare_track(db_track, requested_by)
             except Exception as e:
-                self.bot.db.mark_music_track_status(db_track["id"], "error", str(e)[:1000])
+                await self.bot.async_db.mark_music_track_status(
+                    db_track["id"],
+                    "error",
+                    str(e)[:1000],
+                )
                 self.logger.warning(
                     "Музыка: трек из плейлиста недоступен и будет пропущен | guild=%s owner=%s db_track=%s error=%s",
                     guild.id,
@@ -717,9 +737,28 @@ class MusicCommands(commands.Cog):
             options=FFMPEG_OPTIONS,
         )
 
+        async def finalize_playback(
+            status: str,
+            error_message: str | None,
+            stop_reason: str | None,
+        ) -> None:
+            await self.bot.async_db.mark_music_track_status(
+                track.db_track_id,
+                status,
+                error_message,
+            )
+            if stop_reason in {"stop", "leave"}:
+                state.current = None
+                if stop_reason == "leave":
+                    state.now_playing_message = None
+                return
+
+            await self._play_next(guild, text_channel)
+
         def after_play(error: Optional[Exception]) -> None:
             stop_reason = state.stop_reason
             state.stop_reason = None
+            error_message = None
             if error:
                 status = "error"
                 error_message = str(error)[:1000]
@@ -732,7 +771,6 @@ class MusicCommands(commands.Cog):
                 elif stop_reason == "previous":
                     status = "pending"
                     error_message = None
-                self.bot.db.mark_music_track_status(track.db_track_id, status, error_message)
                 self.logger.error(
                     "Музыка: ffmpeg/voice завершился с ошибкой | guild=%s title=%s status=%s error=%s",
                     guild.id,
@@ -746,7 +784,6 @@ class MusicCommands(commands.Cog):
                     status = "pending"
                 if stop_reason == "previous":
                     status = "pending"
-                self.bot.db.mark_music_track_status(track.db_track_id, status)
                 self.logger.debug(
                     "Музыка: трек завершён | guild=%s title=%s status=%s",
                     guild.id,
@@ -754,14 +791,8 @@ class MusicCommands(commands.Cog):
                     status,
                 )
 
-            if stop_reason in {"stop", "leave"}:
-                state.current = None
-                if stop_reason == "leave":
-                    state.now_playing_message = None
-                return
-
             future = asyncio.run_coroutine_threadsafe(
-                self._play_next(guild, text_channel),
+                finalize_playback(status, error_message, stop_reason),
                 self.bot.loop,
             )
             future.add_done_callback(self._log_playback_task_error)
@@ -819,7 +850,10 @@ class MusicCommands(commands.Cog):
             if voice_client.is_playing() or voice_client.is_paused():
                 self.require_same_voice_channel(inter)
             state = self._get_state(inter.guild.id)
-            playlist_stats = self.bot.db.get_music_playlist_stats(inter.guild.id, inter.author.id)
+            playlist_stats = await self.bot.async_db.get_music_playlist_stats(
+                inter.guild.id,
+                inter.author.id,
+            )
             self.logger.debug(
                 "Музыка: состояние перед добавлением | guild=%s owner=%s pending=%s playing=%s paused=%s",
                 inter.guild.id,
@@ -840,7 +874,7 @@ class MusicCommands(commands.Cog):
                 music_items = await self._extract_music_items(query)
                 skipped_tracks = max(len(music_items) - free_slots, 0)
                 items_to_add = music_items[:free_slots]
-                append_result = self.bot.db.append_music_tracks(
+                append_result = await self.bot.async_db.append_music_tracks(
                     inter.guild.id,
                     inter.author.id,
                     items_to_add,
@@ -951,11 +985,14 @@ class MusicCommands(commands.Cog):
         try:
             voice_client = self.require_same_voice_channel(inter)
             if not voice_client:
-                removed_tracks = self.bot.db.clear_music_playlist(inter.guild.id, inter.author.id)
+                removed_tracks = await self.bot.async_db.clear_music_playlist(
+                    inter.guild.id,
+                    inter.author.id,
+                )
                 await inter.response.send_message(f"Ваш личный плейлист очищен. Удалено треков: `{removed_tracks}`.")
                 return
 
-            message = self.stop_music(inter.guild, voice_client, inter.author.id)
+            message = await self.stop_music(inter.guild, voice_client, inter.author.id)
             await inter.response.send_message(message)
         except ValueError as e:
             await inter.response.send_message(str(e), ephemeral=True)
@@ -998,7 +1035,13 @@ class MusicCommands(commands.Cog):
             inter.guild.id,
         )
         view = MusicQueueView(self, inter.author.id, inter.guild.id)
-        embed = self.build_queue_embed(inter.guild, inter.author.id, view.page)
+        page_data = await view._sync_buttons()
+        embed = await self.build_queue_embed(
+            inter.guild,
+            inter.author.id,
+            view.page,
+            page_data=page_data,
+        )
         await inter.response.send_message(embed=embed, view=view)
 
     @commands.slash_command(name="leave", description="Отключить бота от голосового канала")

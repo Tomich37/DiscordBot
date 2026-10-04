@@ -1,14 +1,12 @@
 import disnake
-from app.modules.database import Database
 
 
 class RecruitementModal(disnake.ui.Modal):
-    def __init__(self, arg, guild_id, logger):
+    def __init__(self, db, arg, guild_id, logger, questions):
         self.logger = logger
         self.guild_id = guild_id
         self.arg = arg  # arg - это аргумент, который передается в конструкторе класса RecruitementSelect
-        self.db = Database()
-        questions = self.db.get_recruitment_questions(guild_id)
+        self.db = db
 
         if not questions:
             questions = [
@@ -54,7 +52,7 @@ class RecruitementModal(disnake.ui.Modal):
 
     async def callback(self, interaction: disnake.ModalInteraction) -> None:
         try:
-            recruitment = self.db.get_recruitment_by_guild(interaction.guild.id)
+            recruitment = await self.db.get_recruitment_by_guild(interaction.guild.id)
             if not recruitment or not recruitment.channel_id:
                 await interaction.response.send_message(
                     "Канал для заявок ещё не настроен. Обратитесь к администрации.",
