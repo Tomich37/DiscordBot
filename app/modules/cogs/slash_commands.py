@@ -1,4 +1,4 @@
-import asyncio
+﻿import asyncio
 from datetime import datetime, timezone
 
 import disnake
@@ -1360,5 +1360,5 @@ class SlashCommands(commands.Cog):
 
 
 def setup(bot, logger):
-    bot.add_view(RecruitmentView(logger))
+    bot.add_view(RecruitmentView(bot.async_db, logger))
     bot.add_cog(SlashCommands(bot, logger))
