@@ -15,6 +15,8 @@ import yt_dlp
 from disnake import voice_client as disnake_voice_client
 from disnake.ext import commands
 
+from app.modules.interaction_response import send_interaction_response
+
 
 YTDL_OPTIONS = {
     "format": "bestaudio/best",
@@ -83,16 +85,16 @@ class MusicControlView(disnake.ui.View):
 
     async def _get_voice_client(self, interaction: disnake.MessageInteraction) -> disnake.VoiceClient | None:
         if interaction.guild is None:
-            await interaction.response.send_message("Музыка работает только на сервере.", ephemeral=True)
+            await send_interaction_response(interaction, "Музыка работает только на сервере.", ephemeral=True)
             return None
 
         voice_client = interaction.guild.voice_client
         if not voice_client:
-            await interaction.response.send_message("Я не подключена к голосовому каналу.", ephemeral=True)
+            await send_interaction_response(interaction, "Я не подключена к голосовому каналу.", ephemeral=True)
             return None
 
         if not self.cog.is_user_in_bot_voice_channel(interaction.author, voice_client):
-            await interaction.response.send_message(
+            await send_interaction_response(interaction,
                 "Управлять музыкой можно только из того голосового канала, где сейчас находится бот.",
                 ephemeral=True,
             )
@@ -107,7 +109,7 @@ class MusicControlView(disnake.ui.View):
             return
 
         message = await self.cog.previous_track(interaction.guild, voice_client, interaction.author.id)
-        await interaction.response.send_message(message, ephemeral=True)
+        await send_interaction_response(interaction, message, ephemeral=True)
 
     @disnake.ui.button(label="⏯", style=disnake.ButtonStyle.primary, custom_id="music_pause_resume")
     async def pause_resume(self, button: disnake.ui.Button, interaction: disnake.MessageInteraction) -> None:
@@ -116,7 +118,7 @@ class MusicControlView(disnake.ui.View):
             return
 
         message = self.cog.toggle_pause(interaction.guild, voice_client, interaction.author.id)
-        await interaction.response.send_message(message, ephemeral=True)
+        await send_interaction_response(interaction, message, ephemeral=True)
 
     @disnake.ui.button(label="⏭", style=disnake.ButtonStyle.secondary, custom_id="music_skip")
     async def skip_track(self, button: disnake.ui.Button, interaction: disnake.MessageInteraction) -> None:
@@ -125,7 +127,7 @@ class MusicControlView(disnake.ui.View):
             return
 
         message = self.cog.skip_track(interaction.guild, voice_client, interaction.author.id)
-        await interaction.response.send_message(message, ephemeral=True)
+        await send_interaction_response(interaction, message, ephemeral=True)
 
     @disnake.ui.button(label="⏹", style=disnake.ButtonStyle.danger, custom_id="music_stop")
     async def stop_music(self, button: disnake.ui.Button, interaction: disnake.MessageInteraction) -> None:
@@ -134,7 +136,7 @@ class MusicControlView(disnake.ui.View):
             return
 
         message = await self.cog.stop_music(interaction.guild, voice_client, interaction.author.id)
-        await interaction.response.send_message(message, ephemeral=True)
+        await send_interaction_response(interaction, message, ephemeral=True)
 
 
 class MusicQueueView(disnake.ui.View):
@@ -149,7 +151,7 @@ class MusicQueueView(disnake.ui.View):
         if interaction.author.id == self.author_id:
             return True
 
-        await interaction.response.send_message(
+        await send_interaction_response(interaction,
             "Эти кнопки относятся к чужому сообщению `/queue`. Вызовите команду сами.",
             ephemeral=True,
         )
@@ -833,7 +835,7 @@ class MusicCommands(commands.Cog):
         ),
     ) -> None:
         if inter.guild is None:
-            await inter.response.send_message("Музыка работает только на сервере.", ephemeral=True)
+            await send_interaction_response(inter, "Музыка работает только на сервере.", ephemeral=True)
             return
 
         self.logger.info(
@@ -968,18 +970,18 @@ class MusicCommands(commands.Cog):
         try:
             voice_client = self.require_same_voice_channel(inter)
             if not voice_client or not (voice_client.is_playing() or voice_client.is_paused()):
-                await inter.response.send_message("Сейчас ничего не играет.", ephemeral=True)
+                await send_interaction_response(inter, "Сейчас ничего не играет.", ephemeral=True)
                 return
 
             message = self.skip_track(inter.guild, voice_client, inter.author.id)
-            await inter.response.send_message(message)
+            await send_interaction_response(inter, message)
         except ValueError as e:
-            await inter.response.send_message(str(e), ephemeral=True)
+            await send_interaction_response(inter, str(e), ephemeral=True)
 
     @commands.slash_command(name="stop", description="Остановить музыку и очистить очередь")
     async def stop(self, inter: disnake.ApplicationCommandInteraction) -> None:
         if inter.guild is None:
-            await inter.response.send_message("Музыка работает только на сервере.", ephemeral=True)
+            await send_interaction_response(inter, "Музыка работает только на сервере.", ephemeral=True)
             return
 
         try:
@@ -989,44 +991,44 @@ class MusicCommands(commands.Cog):
                     inter.guild.id,
                     inter.author.id,
                 )
-                await inter.response.send_message(f"Ваш личный плейлист очищен. Удалено треков: `{removed_tracks}`.")
+                await send_interaction_response(inter, f"Ваш личный плейлист очищен. Удалено треков: `{removed_tracks}`.")
                 return
 
             message = await self.stop_music(inter.guild, voice_client, inter.author.id)
-            await inter.response.send_message(message)
+            await send_interaction_response(inter, message)
         except ValueError as e:
-            await inter.response.send_message(str(e), ephemeral=True)
+            await send_interaction_response(inter, str(e), ephemeral=True)
 
     @commands.slash_command(name="pause", description="Поставить музыку на паузу")
     async def pause(self, inter: disnake.ApplicationCommandInteraction) -> None:
         try:
             voice_client = self.require_same_voice_channel(inter)
             if not voice_client or not voice_client.is_playing():
-                await inter.response.send_message("Сейчас нечего ставить на паузу.", ephemeral=True)
+                await send_interaction_response(inter, "Сейчас нечего ставить на паузу.", ephemeral=True)
                 return
 
             message = self.toggle_pause(inter.guild, voice_client, inter.author.id)
-            await inter.response.send_message(message)
+            await send_interaction_response(inter, message)
         except ValueError as e:
-            await inter.response.send_message(str(e), ephemeral=True)
+            await send_interaction_response(inter, str(e), ephemeral=True)
 
     @commands.slash_command(name="resume", description="Продолжить музыку после паузы")
     async def resume(self, inter: disnake.ApplicationCommandInteraction) -> None:
         try:
             voice_client = self.require_same_voice_channel(inter)
             if not voice_client or not voice_client.is_paused():
-                await inter.response.send_message("Музыка не стоит на паузе.", ephemeral=True)
+                await send_interaction_response(inter, "Музыка не стоит на паузе.", ephemeral=True)
                 return
 
             message = self.toggle_pause(inter.guild, voice_client, inter.author.id)
-            await inter.response.send_message(message)
+            await send_interaction_response(inter, message)
         except ValueError as e:
-            await inter.response.send_message(str(e), ephemeral=True)
+            await send_interaction_response(inter, str(e), ephemeral=True)
 
     @commands.slash_command(name="queue", description="Показать текущую очередь музыки")
     async def queue(self, inter: disnake.ApplicationCommandInteraction) -> None:
         if inter.guild is None:
-            await inter.response.send_message("Музыка работает только на сервере.", ephemeral=True)
+            await send_interaction_response(inter, "Музыка работает только на сервере.", ephemeral=True)
             return
 
         self.logger.debug(
@@ -1042,14 +1044,14 @@ class MusicCommands(commands.Cog):
             view.page,
             page_data=page_data,
         )
-        await inter.response.send_message(embed=embed, view=view)
+        await send_interaction_response(inter, embed=embed, view=view)
 
     @commands.slash_command(name="leave", description="Отключить бота от голосового канала")
     async def leave(self, inter: disnake.ApplicationCommandInteraction) -> None:
         try:
             voice_client = self.require_same_voice_channel(inter)
             if not voice_client:
-                await inter.response.send_message("Я не подключена к голосовому каналу.", ephemeral=True)
+                await send_interaction_response(inter, "Я не подключена к голосовому каналу.", ephemeral=True)
                 return
 
             self.logger.info(
@@ -1065,9 +1067,9 @@ class MusicCommands(commands.Cog):
             if inter.guild:
                 self.guild_states.pop(inter.guild.id, None)
 
-            await inter.response.send_message("Отключилась от голосового канала.")
+            await send_interaction_response(inter, "Отключилась от голосового канала.")
         except ValueError as e:
-            await inter.response.send_message(str(e), ephemeral=True)
+            await send_interaction_response(inter, str(e), ephemeral=True)
 
 
 def setup(bot, logger):

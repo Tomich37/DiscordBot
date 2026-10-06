@@ -12,6 +12,11 @@ from disnake import ApplicationCommandInteraction
 from app.modules.logger import SetLogs
 from app.modules.async_database import AsyncDatabase
 from app.modules.database import Database
+from app.modules.interaction_response import (
+    acknowledge_slash_command,
+    clear_deferred_interaction_response,
+    send_interaction_response,
+)
 from app.modules.messages import Messages
 from app.modules.scripts import Scripts
 
@@ -83,9 +88,7 @@ def _interaction_name(inter):
 
 
 async def send_interaction_message(inter, *args, **kwargs):
-    if inter.response.is_done():
-        return await inter.followup.send(*args, **kwargs)
-    return await inter.response.send_message(*args, **kwargs)
+    return await send_interaction_response(inter, *args, **kwargs)
 
 
 def _is_mi_user(target) -> bool:
@@ -149,6 +152,16 @@ class Bot(commands.Bot):
         self.channel_message_counters = defaultdict(int)
         self.user_message_counters_lock = asyncio.Lock()
         self.user_stats_flush_task = None
+        self._deferred_interactions = {}
+        self.before_slash_command_invoke(self._acknowledge_slash_command)
+        self.after_slash_command_invoke(self._clear_deferred_interaction_response)
+
+    async def _acknowledge_slash_command(self, inter) -> None:
+        await acknowledge_slash_command(self, inter, _interaction_name(inter))
+
+    async def _clear_deferred_interaction_response(self, inter) -> None:
+        if not getattr(inter, "command_failed", False):
+            clear_deferred_interaction_response(self, inter)
 
     def is_mi_user(self, user) -> bool:
         return bool(self.mi_user_id and user and user.id == self.mi_user_id)
@@ -409,7 +422,18 @@ class Bot(commands.Bot):
             f"{_format_user(inter.author)} | {_format_guild(inter.guild)} | {_format_channel(inter.channel)}",
             exc_info=(type(error), error, error.__traceback__),
         )
-        await super().on_slash_command_error(inter, error)
+        try:
+            await send_interaction_message(
+                inter,
+                "Команда не выполнилась из-за внутренней ошибки. Попробуйте ещё раз позже.",
+                ephemeral=True,
+            )
+        except (disnake.HTTPException, disnake.InteractionTimedOut) as response_error:
+            self.logger.warning(
+                "Не удалось сообщить пользователю об ошибке команды /%s: %s",
+                _interaction_name(inter),
+                response_error,
+            )
 
 async def load_cogs(bot):
     cogs_dir = Path("./app/modules/cogs")

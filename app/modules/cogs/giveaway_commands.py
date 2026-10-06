@@ -3,6 +3,7 @@ import random
 import disnake
 from disnake.ext import commands
 
+from app.modules.interaction_response import send_interaction_response
 from app.modules.menus.giveaway import GiveawayFinishView
 from app.modules.modals.giveaway_modal import GiveawayModal
 
@@ -46,7 +47,7 @@ class GiveawayCommands(commands.Cog):
                 )
             )
         except Exception as e:
-            await inter.response.send_message(
+            await send_interaction_response(inter,
                 f"Ошибка при открытии окна создания розыгрыша: {e}",
                 ephemeral=True,
             )

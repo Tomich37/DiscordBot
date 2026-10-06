@@ -3,6 +3,8 @@ from datetime import date, timedelta
 import disnake
 from disnake.ext import commands
 
+from app.modules.interaction_response import send_interaction_response
+
 from app.modules.alchemy_service import (
     AlchemyConfigError,
     AlchemyGenerationError,
@@ -106,7 +108,7 @@ class AlchemyPaginationView(disnake.ui.View):
         if interaction.author.id == self.author_id:
             return True
 
-        await interaction.response.send_message("Эти кнопки относятся к чужому списку.", ephemeral=True)
+        await send_interaction_response(interaction, "Эти кнопки относятся к чужому списку.", ephemeral=True)
         return False
 
     async def refresh_page(self, interaction: disnake.MessageInteraction) -> None:
@@ -197,19 +199,19 @@ class AlchemyCommands(commands.Cog):
 
             if result["created"]:
                 elements = ", ".join(name for _, name in BASE_ALCHEMY_ELEMENTS)
-                await inter.response.send_message(
+                await send_interaction_response(inter,
                     f"Профиль алхимика создан. Баланс: `{result['balance']}`. "
                     f"Стартовые элементы: {elements}."
                 )
                 return
 
-            await inter.response.send_message(
+            await send_interaction_response(inter,
                 f"Профиль алхимика уже есть. Баланс: `{result['balance']}`, "
                 f"элементов: `{result['element_count']}`."
             )
         except Exception as error:
             self.logger.exception(f"Ошибка в commands/alchemy_start: {error}")
-            await inter.response.send_message("Не получилось создать профиль алхимика.", ephemeral=True)
+            await send_interaction_response(inter, "Не получилось создать профиль алхимика.", ephemeral=True)
 
     @commands.slash_command(
         name="daily",
@@ -227,19 +229,19 @@ class AlchemyCommands(commands.Cog):
 
             if result["status"] == "already_claimed":
                 tomorrow = date.today() + timedelta(days=1)
-                await inter.response.send_message(
+                await send_interaction_response(inter,
                     f"Дейлик уже забран. Следующая награда будет доступна `{tomorrow}`. "
                     f"Баланс: `{result['balance']}`.",
                     ephemeral=True,
                 )
                 return
 
-            await inter.response.send_message(
+            await send_interaction_response(inter,
                 f"Вы получили `{result['reward']}` валюты. Баланс: `{result['balance']}`."
             )
         except Exception as error:
             self.logger.exception(f"Ошибка в commands/daily: {error}")
-            await inter.response.send_message("Не получилось выдать дейлик.", ephemeral=True)
+            await send_interaction_response(inter, "Не получилось выдать дейлик.", ephemeral=True)
 
     @commands.slash_command(
         name="balance",
@@ -249,13 +251,13 @@ class AlchemyCommands(commands.Cog):
     async def balance(self, inter: disnake.GuildCommandInteraction):
         try:
             profile = await self.db.get_alchemy_profile(inter.guild.id, inter.author.id)
-            await inter.response.send_message(
+            await send_interaction_response(inter,
                 f"Ваш баланс: `{profile['balance']}`.",
                 ephemeral=True,
             )
         except Exception as error:
             self.logger.exception(f"Ошибка в commands/balance: {error}")
-            await inter.response.send_message("Не получилось показать баланс.", ephemeral=True)
+            await send_interaction_response(inter, "Не получилось показать баланс.", ephemeral=True)
 
     @commands.slash_command(
         name="alchemy_combine",
@@ -401,7 +403,7 @@ class AlchemyCommands(commands.Cog):
             if inter.response.is_done():
                 await inter.followup.send("Произошла ошибка при сочетании элементов.", ephemeral=True)
             else:
-                await inter.response.send_message("Произошла ошибка при сочетании элементов.", ephemeral=True)
+                await send_interaction_response(inter, "Произошла ошибка при сочетании элементов.", ephemeral=True)
 
     @commands.slash_command(
         name="alchemy_inventory",
@@ -420,7 +422,7 @@ class AlchemyCommands(commands.Cog):
                 page_size=INVENTORY_PAGE_SIZE,
             )
             if inventory["status"] == "not_started":
-                await inter.response.send_message("Сначала начните игру командой `/alchemy_start`.", ephemeral=True)
+                await send_interaction_response(inter, "Сначала начните игру командой `/alchemy_start`.", ephemeral=True)
                 return
 
             view = AlchemyInventoryView(
@@ -429,14 +431,14 @@ class AlchemyCommands(commands.Cog):
                 user_id=inter.author.id,
                 total_pages=inventory["total_pages"],
             )
-            await inter.response.send_message(
+            await send_interaction_response(inter,
                 embed=_build_inventory_embed(inventory),
                 view=view,
                 ephemeral=True,
             )
         except Exception as error:
             self.logger.exception(f"Ошибка в commands/alchemy_inventory: {error}")
-            await inter.response.send_message("Не получилось показать коллекцию.", ephemeral=True)
+            await send_interaction_response(inter, "Не получилось показать коллекцию.", ephemeral=True)
 
     @commands.slash_command(
         name="alchemy_recipes",
@@ -454,7 +456,7 @@ class AlchemyCommands(commands.Cog):
                 page_size=RECIPES_PAGE_SIZE,
             )
             if not recipes["items"]:
-                await inter.response.send_message("На этом сервере пока нет открытых рецептов.", ephemeral=True)
+                await send_interaction_response(inter, "На этом сервере пока нет открытых рецептов.", ephemeral=True)
                 return
 
             view = AlchemyRecipesView(
@@ -463,14 +465,14 @@ class AlchemyCommands(commands.Cog):
                 author_id=inter.author.id,
                 total_pages=recipes["total_pages"],
             )
-            await inter.response.send_message(
+            await send_interaction_response(inter,
                 embed=_build_recipes_embed(inter.guild, recipes),
                 view=view,
                 ephemeral=True,
             )
         except Exception as error:
             self.logger.exception(f"Ошибка в commands/alchemy_recipes: {error}")
-            await inter.response.send_message("Не получилось показать рецепты.", ephemeral=True)
+            await send_interaction_response(inter, "Не получилось показать рецепты.", ephemeral=True)
 
 
 def setup(bot, logger):

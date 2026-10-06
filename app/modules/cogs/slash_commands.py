@@ -5,6 +5,7 @@ import disnake
 from disnake.ext import commands
 
 from app.modules.menus.recruitment import RecruitmentView
+from app.modules.interaction_response import send_interaction_response
 from app.modules.modals.anonymous_message_modal import AnonymousMessageModal
 from app.modules.modals.recruitment_setup_modal import RecruitmentSetupModal
 from app.modules.scripts import Scripts
@@ -25,9 +26,7 @@ ANONYMOUS_CHANNEL_CHECK_TIMEOUT_SECONDS = 1.5
 
 
 async def send_interaction_message(inter, *args, **kwargs):
-    if inter.response.is_done():
-        return await inter.followup.send(*args, **kwargs)
-    return await inter.response.send_message(*args, **kwargs)
+    return await send_interaction_response(inter, *args, **kwargs)
 
 
 class LeaderboardPaginationView(disnake.ui.View):
@@ -49,7 +48,7 @@ class LeaderboardPaginationView(disnake.ui.View):
         if interaction.author.id == self.author_id:
             return True
 
-        await interaction.response.send_message(
+        await send_interaction_response(interaction,
             "Эти кнопки относятся к чужому лидерборду. Вызовите `/leaderboard` сами, чтобы листать свою выдачу.",
             ephemeral=True,
         )
@@ -655,9 +654,9 @@ class SlashCommands(commands.Cog):
         try:
             target_member = member or inter.author
             embed = await self._build_profile_embed(target_member)
-            await inter.response.send_message(embed=embed)
+            await send_interaction_response(inter, embed=embed)
         except Exception as e:
-            await inter.response.send_message(
+            await send_interaction_response(inter,
                 "Не получилось собрать профиль пользователя.",
                 ephemeral=True,
             )
@@ -689,11 +688,11 @@ class SlashCommands(commands.Cog):
             )
             view = LeaderboardPaginationView(inter.author.id, pages)
             if len(pages) > 1:
-                await inter.response.send_message(embed=pages[0], view=view)
+                await send_interaction_response(inter, embed=pages[0], view=view)
             else:
-                await inter.response.send_message(embed=pages[0])
+                await send_interaction_response(inter, embed=pages[0])
         except Exception as e:
-            await inter.response.send_message(
+            await send_interaction_response(inter,
                 "Не получилось собрать лидерборд сервера.",
                 ephemeral=True,
             )
@@ -740,7 +739,7 @@ class SlashCommands(commands.Cog):
         try:
             if asset_type == "server":
                 if not inter.guild.icon:
-                    await inter.response.send_message(
+                    await send_interaction_response(inter,
                         "У этого сервера нет иконки.",
                         ephemeral=True,
                     )
@@ -753,7 +752,7 @@ class SlashCommands(commands.Cog):
                     image_url=image_url,
                     color=0x2ECC71,
                 )
-                await inter.response.send_message(embed=embed)
+                await send_interaction_response(inter, embed=embed)
                 return
 
             target_member = member or inter.author
@@ -764,9 +763,9 @@ class SlashCommands(commands.Cog):
                 image_url=avatar_asset.url,
                 color=target_member.color.value or 0x5865F2,
             )
-            await inter.response.send_message(embed=embed)
+            await send_interaction_response(inter, embed=embed)
         except Exception as e:
-            await inter.response.send_message(
+            await send_interaction_response(inter,
                 "Не получилось получить аватар.",
                 ephemeral=True,
             )
@@ -795,7 +794,7 @@ class SlashCommands(commands.Cog):
         try:
             if asset_type == "server":
                 if not inter.guild.banner:
-                    await inter.response.send_message(
+                    await send_interaction_response(inter,
                         "У этого сервера нет баннера.",
                         ephemeral=True,
                     )
@@ -808,13 +807,13 @@ class SlashCommands(commands.Cog):
                     image_url=image_url,
                     color=0x9B59B6,
                 )
-                await inter.response.send_message(embed=embed)
+                await send_interaction_response(inter, embed=embed)
                 return
 
             target_member = member or inter.author
             user = await self.bot.fetch_user(target_member.id)
             if not user.banner:
-                await inter.response.send_message(
+                await send_interaction_response(inter,
                     f"У пользователя {target_member.mention} нет баннера профиля.",
                     ephemeral=True,
                 )
@@ -827,9 +826,9 @@ class SlashCommands(commands.Cog):
                 image_url=image_url,
                 color=target_member.color.value or 0x9B59B6,
             )
-            await inter.response.send_message(embed=embed)
+            await send_interaction_response(inter, embed=embed)
         except Exception as e:
-            await inter.response.send_message(
+            await send_interaction_response(inter,
                 "Не получилось получить баннер.",
                 ephemeral=True,
             )
@@ -987,9 +986,9 @@ class SlashCommands(commands.Cog):
         """
         try:
             embed = self._build_server_info_embed(inter.guild)
-            await inter.response.send_message(embed=embed)
+            await send_interaction_response(inter, embed=embed)
         except Exception as e:
-            await inter.response.send_message(
+            await send_interaction_response(inter,
                 "Не получилось собрать профиль сервера.",
                 ephemeral=True,
             )
@@ -1024,7 +1023,7 @@ class SlashCommands(commands.Cog):
         try:
             if action == "add":
                 await member.add_roles(role)
-                await inter.response.send_message(
+                await send_interaction_response(inter,
                     f"Роль {role.name} успешно добавлена участнику {member.display_name}."
                 )
                 self.logger.info(
@@ -1032,17 +1031,17 @@ class SlashCommands(commands.Cog):
                 )
             else:
                 await member.remove_roles(role)
-                await inter.response.send_message(
+                await send_interaction_response(inter,
                     f"Роль {role.name} успешно снята с участника {member.display_name}."
                 )
                 self.logger.info(
                     f"Снятие роли {role.name} с участника {member.display_name}."
                 )
         except disnake.errors.Forbidden:
-            await inter.response.send_message("У меня нет прав для изменения ролей.")
+            await send_interaction_response(inter, "У меня нет прав для изменения ролей.")
             self.logger.info("Ошибка: недостаточно прав")
         except Exception as e:
-            await inter.response.send_message("Произошла ошибка")
+            await send_interaction_response(inter, "Произошла ошибка")
             self.logger.info(f"Произошла ошибка: {e}")
 
     contestStatus = commands.option_enum({"Запуск конкурса": "start", "Завершение конкурса": "stop"})
@@ -1091,7 +1090,7 @@ class SlashCommands(commands.Cog):
                     emoji_str=emoji_str,
                 )
                 await self.db.create_update_contest(guild_id, channel_id, emoji_str, True)
-                await inter.send(
+                await send_interaction_response(inter,
                     f"Конкурс `{contest.contest_name}` в канале <#{channel_id}> активирован. "
                     f"Выбранное эмодзи: {emoji_str}",
                     ephemeral=False,
@@ -1103,7 +1102,7 @@ class SlashCommands(commands.Cog):
                     contest_name=contest_name,
                 )
                 if not contest:
-                    await inter.send(
+                    await send_interaction_response(inter,
                         f"Активный конкурс `{contest_name}` в канале <#{channel_id}> не найден.",
                         ephemeral=False,
                     )
@@ -1118,7 +1117,7 @@ class SlashCommands(commands.Cog):
                 )
                 if not await self.db.get_active_contests_for_channel(guild_id, channel_id):
                     await self.db.create_update_contest(guild_id, channel_id, contest.emoji_str, False)
-                await inter.send(
+                await send_interaction_response(inter,
                     f"Конкурс `{contest.contest_name}` в канале <#{channel_id}> завершён.",
                     ephemeral=False,
                 )
@@ -1202,12 +1201,12 @@ class SlashCommands(commands.Cog):
             await self.db.create_update_channel_statistic(guild_id, channel_id, is_active)
 
             if is_active:
-                await inter.send(
+                await send_interaction_response(inter,
                     f"Отслеживание статистики в канале <#{channel_id}> активировано.",
                     ephemeral=False,
                 )
             else:
-                await inter.send(
+                await send_interaction_response(inter,
                     f"Отслеживание статистики в канале <#{channel_id}> завершено",
                     ephemeral=False,
                 )
@@ -1255,7 +1254,7 @@ class SlashCommands(commands.Cog):
                 )
             )
         except Exception as e:
-            await inter.response.send_message(
+            await send_interaction_response(inter,
                 f"Ошибка при открытии настройки набора: {e}",
                 ephemeral=True,
             )
@@ -1291,12 +1290,12 @@ class SlashCommands(commands.Cog):
             await self.db.create_update_channel_anonimus(guild_id, channel_id, is_active)
 
             if is_active:
-                await inter.send(
+                await send_interaction_response(inter,
                     f"Анонимные сообщения в канале <#{channel_id}> активированы.",
                     ephemeral=False,
                 )
             else:
-                await inter.send(
+                await send_interaction_response(inter,
                     f"Анонимные сообщения в канале <#{channel_id}> выключены",
                     ephemeral=False,
                 )
@@ -1327,14 +1326,14 @@ class SlashCommands(commands.Cog):
                 self.logger.warning(
                     "Проверка канала для /anonimuska не завершилась за 1,5 секунды"
                 )
-                await inter.response.send_message(
+                await send_interaction_response(inter,
                     "Не удалось быстро проверить настройки канала. Попробуйте ещё раз позже.",
                     ephemeral=True,
                 )
                 return
 
             if inter.channel.id not in anonymous_channels:
-                await inter.response.send_message(
+                await send_interaction_response(inter,
                     "Данный канал не поддерживает анонимные сообщения.",
                     ephemeral=True,
                 )
@@ -1353,7 +1352,7 @@ class SlashCommands(commands.Cog):
             self.logger.exception(f"Ошибка в commands/slash_command/send_anonimus_channel: {e}")
             print(f"Ошибка при открытии формы анонимного сообщения: {e}")
             if not inter.response.is_done():
-                await inter.response.send_message(
+                await send_interaction_response(inter,
                     "Не удалось открыть форму анонимного сообщения.",
                     ephemeral=True,
                 )
