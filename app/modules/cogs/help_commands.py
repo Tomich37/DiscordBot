@@ -1,6 +1,8 @@
 ﻿import disnake
 from disnake.ext import commands
 
+from app.modules.interaction_response import send_interaction_response
+
 
 BOT_NAME = "Emiliabot"
 BOT_URL = (
@@ -456,7 +458,7 @@ class HelpPaginationView(disnake.ui.View):
         if interaction.author.id == self.author_id:
             return True
 
-        await interaction.response.send_message(
+        await send_interaction_response(interaction,
             "Эти кнопки относятся к чужому сообщению `/help`. Вызовите команду сами, чтобы листать свою справку.",
             ephemeral=True,
         )
@@ -617,7 +619,7 @@ class Help(commands.Cog):
         """
         pages = self._build_help_pages()
         view = HelpPaginationView(author_id=inter.author.id, pages=pages)
-        await inter.response.send_message(embed=pages[0], view=view)
+        await send_interaction_response(inter, embed=pages[0], view=view)
 
     @commands.slash_command(
         name="help_command",
@@ -637,7 +639,7 @@ class Help(commands.Cog):
         """
         try:
             if command not in COMMANDS_INFO:
-                await inter.response.send_message(
+                await send_interaction_response(inter,
                     "Команда не найдена. Начните ввод и выберите вариант из подсказок.",
                     ephemeral=True,
                 )
@@ -664,7 +666,7 @@ class Help(commands.Cog):
             details_text = "\n".join(f"• {detail}" for detail in command_info["details"])
             embed.add_field(name="Подробности", value=details_text, inline=False)
 
-            await inter.response.send_message(embed=embed)
+            await send_interaction_response(inter, embed=embed)
         except Exception as e:
             self.logger.exception(f"Ошибка в help_commands/help_command: {e}")
             print(f"Ошибка в help_commands/help_command: {e}")
