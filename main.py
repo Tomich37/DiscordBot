@@ -13,8 +13,8 @@ from app.modules.logger import SetLogs
 from app.modules.async_database import AsyncDatabase
 from app.modules.database import Database
 from app.modules.interaction_response import (
-    acknowledge_slash_command_response,
-    cleanup_slash_command_response,
+    acknowledge_slash_command,
+    clear_deferred_interaction_response,
     send_interaction_response,
 )
 from app.modules.messages import Messages
@@ -152,15 +152,16 @@ class Bot(commands.Bot):
         self.channel_message_counters = defaultdict(int)
         self.user_message_counters_lock = asyncio.Lock()
         self.user_stats_flush_task = None
-        self._automatically_acknowledged_interactions = set()
-        self.before_slash_command_invoke(self._acknowledge_slash_command_response)
-        self.after_slash_command_invoke(self._cleanup_slash_command_response)
+        self._deferred_interactions = {}
+        self.before_slash_command_invoke(self._acknowledge_slash_command)
+        self.after_slash_command_invoke(self._clear_deferred_interaction_response)
 
-    async def _acknowledge_slash_command_response(self, inter) -> None:
-        await acknowledge_slash_command_response(self, inter, _interaction_name(inter))
+    async def _acknowledge_slash_command(self, inter) -> None:
+        await acknowledge_slash_command(self, inter, _interaction_name(inter))
 
-    async def _cleanup_slash_command_response(self, inter) -> None:
-        await cleanup_slash_command_response(self, inter, _interaction_name(inter))
+    async def _clear_deferred_interaction_response(self, inter) -> None:
+        if not getattr(inter, "command_failed", False):
+            clear_deferred_interaction_response(self, inter)
 
     def is_mi_user(self, user) -> bool:
         return bool(self.mi_user_id and user and user.id == self.mi_user_id)

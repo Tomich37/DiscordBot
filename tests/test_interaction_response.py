@@ -2,8 +2,7 @@ import unittest
 from types import SimpleNamespace
 
 from app.modules.interaction_response import (
-    acknowledge_slash_command_response,
-    cleanup_slash_command_response,
+    acknowledge_slash_command,
     send_interaction_response,
 )
 
@@ -16,88 +15,110 @@ class FakeResponse:
     def is_done(self) -> bool:
         return self.done
 
-    async def send_message(self, content: str, *, ephemeral: bool) -> None:
+    async def defer(self, *, ephemeral: bool) -> None:
         self.done = True
         self.ephemeral = ephemeral
-        self.content = content
 
 
 class FakeInteraction:
-    def __init__(self, interaction_id: int, command_name: str) -> None:
+    def __init__(self, interaction_id: int) -> None:
         self.id = interaction_id
-        self.application_command = SimpleNamespace(name=command_name)
         self.response = FakeResponse()
-        self.original_response_deleted = False
+        self.bot = None
         self.edited_response = None
         self.sent_response = None
+        self.calls = []
         self.followup = SimpleNamespace(send=self.send_followup)
-        self.bot = None
-
-    async def delete_original_response(self) -> None:
-        self.original_response_deleted = True
 
     async def edit_original_response(self, *args, **kwargs):
+        self.calls.append("edit")
         self.edited_response = (args, kwargs)
 
     async def send_followup(self, *args, **kwargs):
+        self.calls.append("followup")
         self.sent_response = (args, kwargs)
 
     async def send(self, *args, **kwargs):
         self.sent_response = (args, kwargs)
 
 
-class SlashCommandResponseTest(unittest.IsolatedAsyncioTestCase):
+class InteractionResponseTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
-        self.bot = SimpleNamespace(
-            _automatically_acknowledged_interactions=set(),
-            logger=SimpleNamespace(warning=lambda *args, **kwargs: None),
-        )
+        self.bot = SimpleNamespace(_deferred_interactions={})
 
-    async def test_regular_command_is_deferred_and_cleaned_up(self) -> None:
-        interaction = FakeInteraction(1, "leaderboard")
-        interaction.bot = self.bot
+    async def test_regular_command_is_acknowledged_before_callback_work(self) -> None:
+        interaction = FakeInteraction(1)
 
-        await acknowledge_slash_command_response(self.bot, interaction, "leaderboard")
+        await acknowledge_slash_command(self.bot, interaction, "leaderboard")
+
+        self.assertTrue(interaction.response.done)
+        self.assertFalse(interaction.response.ephemeral)
+        self.assertEqual(self.bot._deferred_interactions[interaction.id], False)
+
+    async def test_personal_command_is_acknowledged_ephemerally(self) -> None:
+        interaction = FakeInteraction(4)
+
+        await acknowledge_slash_command(self.bot, interaction, "balance")
 
         self.assertTrue(interaction.response.done)
         self.assertTrue(interaction.response.ephemeral)
-        self.assertIn(interaction.id, self.bot._automatically_acknowledged_interactions)
 
-        await cleanup_slash_command_response(self.bot, interaction, "leaderboard")
+    async def test_modal_command_is_not_acknowledged_before_modal(self) -> None:
+        interaction = FakeInteraction(5)
 
-        self.assertTrue(interaction.original_response_deleted)
-        self.assertNotIn(interaction.id, self.bot._automatically_acknowledged_interactions)
-
-    async def test_modal_command_is_not_deferred(self) -> None:
-        interaction = FakeInteraction(2, "anonimuska")
-        interaction.bot = self.bot
-
-        await acknowledge_slash_command_response(self.bot, interaction, "anonimuska")
+        await acknowledge_slash_command(self.bot, interaction, "anonimuska")
 
         self.assertFalse(interaction.response.done)
-        self.assertNotIn(interaction.id, self.bot._automatically_acknowledged_interactions)
 
-    async def test_public_result_replaces_private_placeholder_with_followup(self) -> None:
-        interaction = FakeInteraction(3, "leaderboard")
+    async def test_public_deferred_response_edits_original_command(self) -> None:
+        interaction = FakeInteraction(2)
         interaction.bot = self.bot
-        await acknowledge_slash_command_response(self.bot, interaction, "leaderboard")
 
-        await send_interaction_response(interaction, "Публичный результат")
+        await acknowledge_slash_command(self.bot, interaction, "leaderboard")
+        await send_interaction_response(
+            interaction,
+            "Лидерборд",
+            embed="embed",
+        )
 
-        self.assertTrue(interaction.original_response_deleted)
-        self.assertEqual(interaction.sent_response, (("Публичный результат",), {}))
-        self.assertNotIn(interaction.id, self.bot._automatically_acknowledged_interactions)
+        self.assertTrue(interaction.response.done)
+        self.assertFalse(interaction.response.ephemeral)
+        self.assertEqual(
+            interaction.edited_response,
+            (("Лидерборд",), {"embed": "embed"}),
+        )
+        self.assertIsNone(interaction.sent_response)
+        self.assertNotIn(interaction.id, self.bot._deferred_interactions)
 
-    async def test_private_result_edits_placeholder_and_is_not_deleted(self) -> None:
-        interaction = FakeInteraction(4, "balance")
+    async def test_fast_response_keeps_standard_interaction_send(self) -> None:
+        interaction = FakeInteraction(3)
         interaction.bot = self.bot
-        await acknowledge_slash_command_response(self.bot, interaction, "balance")
 
-        await send_interaction_response(interaction, "Личный результат", ephemeral=True)
+        await send_interaction_response(interaction, "Понг!")
 
-        self.assertFalse(interaction.original_response_deleted)
-        self.assertEqual(interaction.edited_response, (("Личный результат",), {}))
-        self.assertNotIn(interaction.id, self.bot._automatically_acknowledged_interactions)
+        self.assertEqual(interaction.sent_response, (("Понг!",), {}))
+        self.assertIsNone(interaction.edited_response)
+
+    async def test_private_result_after_public_defer_is_sent_privately_after_ack_edit(self) -> None:
+        interaction = FakeInteraction(6)
+        interaction.bot = self.bot
+        await acknowledge_slash_command(self.bot, interaction, "leaderboard")
+
+        await send_interaction_response(interaction, "Личная ошибка", ephemeral=True)
+
+        self.assertEqual(interaction.calls, ["edit", "followup"])
+        self.assertEqual(
+            interaction.edited_response,
+            ((), {
+                "content": "Запрос обработан. Подробности доступны только вам.",
+                "embed": None,
+                "view": None,
+            }),
+        )
+        self.assertEqual(
+            interaction.sent_response,
+            (("Личная ошибка",), {"ephemeral": True}),
+        )
 
 
 if __name__ == "__main__":
