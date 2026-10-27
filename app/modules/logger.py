@@ -4,6 +4,15 @@ import sys
 from datetime import date, datetime, timedelta
 
 
+def configure_utf8_stream(stream):
+    """Переводит текстовый поток в UTF-8, если поток поддерживает перенастройку."""
+
+    reconfigure = getattr(stream, "reconfigure", None)
+    if callable(reconfigure):
+        reconfigure(encoding="utf-8", errors="backslashreplace")
+    return stream
+
+
 def fix_text_mojibake(text: str) -> str:
     if not isinstance(text, str):
         return text
@@ -169,7 +178,9 @@ class SetLogs:
         technical_handler.addFilter(LevelFilter(technical_levels))
         technical_handler.setFormatter(formatter)
 
-        console_handler = logging.StreamHandler(sys.stdout)
+        # Docker и локальный Windows-терминал могут выбирать разные кодировки.
+        # Явный UTF-8 не даёт кириллице превратиться в символы замены в stdout.
+        console_handler = logging.StreamHandler(configure_utf8_stream(sys.stdout))
         console_handler.setLevel(logging.DEBUG if debug_enabled else logging.INFO)
         console_handler.setFormatter(formatter)
 

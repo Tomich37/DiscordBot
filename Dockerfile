@@ -1,6 +1,12 @@
 # Используем официальный образ Python как базу приложения
 FROM python:3.13.5-bookworm
 
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONUTF8=1 \
+    PYTHONIOENCODING=utf-8 \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8
+
 WORKDIR /app
 
 # Системные пакеты нужны для сборки psycopg2 и работы мультимедиа-зависимостей
