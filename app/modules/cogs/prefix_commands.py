@@ -1,6 +1,8 @@
-from datetime import date
+import os
+from datetime import date, datetime
 from io import BytesIO
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import disnake
 from disnake.ext import commands
@@ -22,6 +24,15 @@ class PrefixCommands(commands.Cog):
         self.bot = bot
         self.logger = logger
         self.db = bot.async_db
+        timezone_name = os.getenv("COOKIE_TIMEZONE", "Asia/Tomsk")
+        try:
+            self.cookie_timezone = ZoneInfo(timezone_name)
+        except ZoneInfoNotFoundError:
+            self.cookie_timezone = ZoneInfo("UTC")
+            self.logger.warning(
+                "Часовой пояс COOKIE_TIMEZONE=%s не найден, для reset_cookie используется UTC.",
+                timezone_name,
+            )
 
     async def cog_check(self, ctx):
         return self.bot.is_mi_user(ctx.author)
@@ -101,6 +112,10 @@ class PrefixCommands(commands.Cog):
             "`e!alchemy_balance ID_пользователя количество`\n"
             "Начисляет валюту алхимии пользователю по ID на текущем сервере.\n"
             "Пример: `e!alchemy_balance 123456789012345678 50`\n"
+            "\n"
+            "`e!reset_cookie ID_пользователя`\n"
+            "Сбрасывает сегодняшнее печенье пользователя на текущем сервере и разрешает открыть новое.\n"
+            "Пример: `e!reset_cookie 123456789012345678`\n"
             "\n"
             "`e!servers`\n"
             "Показывает серверы, где установлен бот, и уже существующую ссылку, если бот может её прочитать.\n"
@@ -221,6 +236,49 @@ class PrefixCommands(commands.Cog):
         except Exception as e:
             self.logger.exception(f"Ошибка в prefix_commands/alchemy_balance: {e}")
             await self._send_dm_notice(ctx, f"Не удалось начислить валюту: {e}")
+
+    @commands.command(name="reset_cookie")
+    async def reset_cookie(self, ctx, user_id: int):
+        if not await self._delete_source_message(ctx):
+            return
+        if ctx.guild is None:
+            await self._send_dm_notice(
+                ctx,
+                "Команда работает только на сервере: `e!reset_cookie ID_пользователя`.",
+            )
+            return
+        if user_id <= 0:
+            await self._send_dm_notice(ctx, "ID пользователя должен быть положительным числом.")
+            return
+
+        try:
+            today = datetime.now(self.cookie_timezone).date()
+            result = await self.db.reset_fortune_cookie_opening(
+                guild_id=ctx.guild.id,
+                user_id=user_id,
+                opened_on=today,
+            )
+            if result["status"] == "not_found":
+                await self._send_dm_notice(
+                    ctx,
+                    f"У пользователя с ID `{user_id}` сегодня ещё нет открытого печенья "
+                    f"на сервере `{ctx.guild.name}`.",
+                )
+                return
+
+            member = ctx.guild.get_member(user_id)
+            target_name = f"`{member.display_name}`" if member else f"ID `{user_id}`"
+            await self._send_dm_notice(
+                ctx,
+                f"Печенье пользователя {target_name} сброшено. Теперь он может снова выполнить `/cookie`.",
+            )
+            self.logger.info(
+                f"Сброс печенья: author={ctx.author.id} guild={ctx.guild.id} "
+                f"user={user_id} prediction={result['prediction_id']} date={today}"
+            )
+        except Exception as e:
+            self.logger.exception(f"Ошибка в prefix_commands/reset_cookie: {e}")
+            await self._send_dm_notice(ctx, f"Не удалось сбросить печенье: {e}")
 
     @commands.command(name="logs")
     async def logs(self, ctx, log_type: str = None, line_count: int = 3):

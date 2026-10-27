@@ -106,20 +106,21 @@ class FortuneCookieCommands(commands.Cog):
 
         async with user_lock:
             try:
+                # Discord ждёт подтверждение interaction не дольше трёх секунд.
+                # Подтверждаем команду до первого обращения к БД: оно может ждать
+                # свободный поток или соединение с PostgreSQL.
+                await inter.response.defer()
+
                 current = await self.db.get_fortune_cookie_opening(
                     guild_id=inter.guild.id,
                     user_id=inter.author.id,
                     opened_on=today,
                 )
                 if current:
-                    await inter.response.send_message(
+                    await inter.edit_original_response(
                         embed=_build_cookie_embed(current, repeated=True),
-                        ephemeral=True,
                     )
                     return
-
-                # Генерация может занять несколько секунд, поэтому подтверждаем команду заранее.
-                await inter.response.defer()
 
                 rarity = choose_rarity()
                 # Выбор и закрепление выполняются под одной блокировкой: пока первый

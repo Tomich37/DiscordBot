@@ -12,6 +12,7 @@ from app.modules.alchemy_connect import (
     GiveawayParticipant,
     GiveawayWin,
     FortuneCookieOpening,
+    FortuneCookieOpeningHistory,
     FortuneCookiePrediction,
     GuildUserStats,
     MessageStatistics,
@@ -93,15 +94,28 @@ class Database:
                 FortuneCookieOpening.guild_id == guild_id,
                 FortuneCookieOpening.user_id == user_id,
             )
+            archived_prediction_ids = db.query(
+                FortuneCookieOpeningHistory.prediction_id
+            ).filter(
+                FortuneCookieOpeningHistory.guild_id == guild_id,
+                FortuneCookieOpeningHistory.user_id == user_id,
+            )
             issued_today_ids = db.query(FortuneCookieOpening.prediction_id).filter(
                 FortuneCookieOpening.opened_on == opened_on,
+            )
+            archived_today_ids = db.query(
+                FortuneCookieOpeningHistory.prediction_id
+            ).filter(
+                FortuneCookieOpeningHistory.opened_on == opened_on,
             )
             prediction = (
                 db.query(FortuneCookiePrediction)
                 .filter(
                     FortuneCookiePrediction.rarity == rarity,
                     ~FortuneCookiePrediction.id.in_(seen_prediction_ids),
+                    ~FortuneCookiePrediction.id.in_(archived_prediction_ids),
                     ~FortuneCookiePrediction.id.in_(issued_today_ids),
+                    ~FortuneCookiePrediction.id.in_(archived_today_ids),
                 )
                 .order_by(func.random())
                 .first()
@@ -179,6 +193,45 @@ class Database:
                 if existing:
                     return {"status": "already_claimed", **existing}
                 raise
+
+    def reset_fortune_cookie_opening(
+        self,
+        guild_id: int,
+        user_id: int,
+        opened_on: date,
+    ) -> dict:
+        """Архивирует сегодняшнюю выдачу и освобождает пользователю новую попытку."""
+
+        with Session(autoflush=False, bind=engine) as db:
+            opening = (
+                db.query(FortuneCookieOpening)
+                .filter(
+                    FortuneCookieOpening.guild_id == guild_id,
+                    FortuneCookieOpening.user_id == user_id,
+                    FortuneCookieOpening.opened_on == opened_on,
+                )
+                .with_for_update()
+                .first()
+            )
+            if not opening:
+                return {"status": "not_found"}
+
+            archived = FortuneCookieOpeningHistory(
+                guild_id=opening.guild_id,
+                user_id=opening.user_id,
+                prediction_id=opening.prediction_id,
+                opened_on=opening.opened_on,
+                created_at=opening.created_at,
+            )
+            prediction_id = opening.prediction_id
+            db.add(archived)
+            db.delete(opening)
+            db.commit()
+            return {
+                "status": "reset",
+                "prediction_id": prediction_id,
+                "opened_on": opened_on,
+            }
 
     def _get_global_alchemy_element(self, db, normalized_name: str):
         return (

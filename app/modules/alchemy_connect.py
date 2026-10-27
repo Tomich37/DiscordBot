@@ -295,6 +295,33 @@ class FortuneCookieOpening(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
+class FortuneCookieOpeningHistory(Base):
+    """Архив сброшенных выдач, сохраняющий историю и дневную уникальность."""
+
+    __tablename__ = "fortune_cookie_opening_history"
+    __table_args__ = (
+        UniqueConstraint(
+            "guild_id",
+            "user_id",
+            "prediction_id",
+            "opened_on",
+            name="uq_fortune_cookie_history_entry",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    guild_id = Column(BigInteger, nullable=False, index=True)
+    user_id = Column(BigInteger, nullable=False, index=True)
+    prediction_id = Column(
+        Integer,
+        ForeignKey("fortune_cookie_predictions.id"),
+        nullable=False,
+        index=True,
+    )
+    opened_on = Column(Date, nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 class TrackedChannel(Base):
     __tablename__ = "tracked_channels"
     id = Column(Integer, primary_key=True, index=True)
