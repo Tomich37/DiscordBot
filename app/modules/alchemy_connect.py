@@ -255,6 +255,46 @@ class AlchemyTransaction(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
+class FortuneCookiePrediction(Base):
+    """Сгенерированное предсказание, общее для всех серверов."""
+
+    __tablename__ = "fortune_cookie_predictions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    seed = Column(BigInteger, nullable=False, unique=True, index=True)
+    text = Column(String(300), nullable=False)
+    normalized_text = Column(String(300), nullable=False, unique=True, index=True)
+    rarity = Column(String(20), nullable=False, index=True)
+    theme = Column(String(80), nullable=False)
+    setting = Column(String(80), nullable=False)
+    tone = Column(String(40), nullable=False)
+    time_horizon = Column(String(80), nullable=False)
+    image = Column(String(40), nullable=False)
+    generation_model = Column(String(80), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class FortuneCookieOpening(Base):
+    """Ежедневная выдача печенья конкретному участнику сервера."""
+
+    __tablename__ = "fortune_cookie_openings"
+    __table_args__ = (
+        UniqueConstraint("guild_id", "user_id", "opened_on", name="uq_fortune_cookie_daily"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    guild_id = Column(BigInteger, nullable=False, index=True)
+    user_id = Column(BigInteger, nullable=False, index=True)
+    prediction_id = Column(
+        Integer,
+        ForeignKey("fortune_cookie_predictions.id"),
+        nullable=False,
+        index=True,
+    )
+    opened_on = Column(Date, nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 class TrackedChannel(Base):
     __tablename__ = "tracked_channels"
     id = Column(Integer, primary_key=True, index=True)

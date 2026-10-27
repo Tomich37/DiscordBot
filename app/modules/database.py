@@ -11,6 +11,8 @@ from app.modules.alchemy_connect import (
     Giveaway,
     GiveawayParticipant,
     GiveawayWin,
+    FortuneCookieOpening,
+    FortuneCookiePrediction,
     GuildUserStats,
     MessageStatistics,
     MusicPlaylist,
@@ -25,6 +27,9 @@ from app.modules.alchemy_connect import (
 )
 from datetime import date, datetime
 
+from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
+
 
 class Database:
     MUSIC_PENDING_STATUSES = ("pending",)
@@ -32,6 +37,143 @@ class Database:
 
     def _get_alchemy_player(self, db, guild_id: int, user_id: int):
         return db.query(AlchemyPlayer).filter_by(guild_id=guild_id, user_id=user_id).first()
+
+    @staticmethod
+    def _serialize_cookie_prediction(prediction: FortuneCookiePrediction) -> dict:
+        return {
+            "id": prediction.id,
+            "seed": prediction.seed,
+            "text": prediction.text,
+            "normalized_text": prediction.normalized_text,
+            "rarity": prediction.rarity,
+            "theme": prediction.theme,
+            "setting": prediction.setting,
+            "tone": prediction.tone,
+            "time_horizon": prediction.time_horizon,
+            "image": prediction.image,
+            "generation_model": prediction.generation_model,
+        }
+
+    def get_fortune_cookie_opening(self, guild_id: int, user_id: int, opened_on: date) -> dict | None:
+        """Возвращает уже выданное пользователю печенье за выбранный день."""
+
+        with Session(autoflush=False, bind=engine) as db:
+            row = (
+                db.query(FortuneCookieOpening, FortuneCookiePrediction)
+                .join(
+                    FortuneCookiePrediction,
+                    FortuneCookiePrediction.id == FortuneCookieOpening.prediction_id,
+                )
+                .filter(
+                    FortuneCookieOpening.guild_id == guild_id,
+                    FortuneCookieOpening.user_id == user_id,
+                    FortuneCookieOpening.opened_on == opened_on,
+                )
+                .first()
+            )
+            if not row:
+                return None
+
+            opening, prediction = row
+            result = self._serialize_cookie_prediction(prediction)
+            result.update({"opening_id": opening.id, "opened_on": opening.opened_on})
+            return result
+
+    def get_unseen_fortune_cookie_prediction(
+        self,
+        guild_id: int,
+        user_id: int,
+        rarity: str,
+    ) -> dict | None:
+        """Выбирает случайное предсказание, которое участник ещё не видел на сервере."""
+
+        with Session(autoflush=False, bind=engine) as db:
+            seen_prediction_ids = db.query(FortuneCookieOpening.prediction_id).filter(
+                FortuneCookieOpening.guild_id == guild_id,
+                FortuneCookieOpening.user_id == user_id,
+            )
+            prediction = (
+                db.query(FortuneCookiePrediction)
+                .filter(
+                    FortuneCookiePrediction.rarity == rarity,
+                    ~FortuneCookiePrediction.id.in_(seen_prediction_ids),
+                )
+                .order_by(func.random())
+                .first()
+            )
+            return self._serialize_cookie_prediction(prediction) if prediction else None
+
+    def get_recent_fortune_cookie_texts(self, limit: int = 1000) -> tuple[str, ...]:
+        """Даёт генератору свежие примеры для проверки смысловых повторов."""
+
+        with Session(autoflush=False, bind=engine) as db:
+            rows = (
+                db.query(FortuneCookiePrediction.text)
+                .order_by(FortuneCookiePrediction.id.desc())
+                .limit(limit)
+                .all()
+            )
+            return tuple(text for (text,) in rows)
+
+    def create_fortune_cookie_prediction(self, prediction_data: dict) -> dict:
+        """Сохраняет новый вариант либо возвращает запись, созданную параллельно."""
+
+        with Session(autoflush=False, bind=engine) as db:
+            prediction = FortuneCookiePrediction(**prediction_data)
+            db.add(prediction)
+            try:
+                db.commit()
+                db.refresh(prediction)
+                return {"status": "created", **self._serialize_cookie_prediction(prediction)}
+            except IntegrityError:
+                db.rollback()
+                existing = (
+                    db.query(FortuneCookiePrediction)
+                    .filter(
+                        (FortuneCookiePrediction.seed == prediction_data["seed"])
+                        | (
+                            FortuneCookiePrediction.normalized_text
+                            == prediction_data["normalized_text"]
+                        )
+                    )
+                    .first()
+                )
+                if existing:
+                    return {"status": "existing", **self._serialize_cookie_prediction(existing)}
+                raise
+
+    def claim_fortune_cookie_prediction(
+        self,
+        guild_id: int,
+        user_id: int,
+        prediction_id: int,
+        opened_on: date,
+    ) -> dict:
+        """Атомарно закрепляет предсказание за пользователем на текущий день."""
+
+        with Session(autoflush=False, bind=engine) as db:
+            prediction = db.query(FortuneCookiePrediction).filter_by(id=prediction_id).first()
+            if not prediction:
+                return {"status": "prediction_not_found"}
+
+            opening = FortuneCookieOpening(
+                guild_id=guild_id,
+                user_id=user_id,
+                prediction_id=prediction_id,
+                opened_on=opened_on,
+            )
+            db.add(opening)
+            try:
+                db.commit()
+                result = self._serialize_cookie_prediction(prediction)
+                result.update({"status": "claimed", "opened_on": opened_on})
+                return result
+            except IntegrityError:
+                db.rollback()
+                existing = self.get_fortune_cookie_opening(guild_id, user_id, opened_on)
+                if existing:
+                    return {"status": "already_claimed", **existing}
+                raise
 
     def _get_global_alchemy_element(self, db, normalized_name: str):
         return (

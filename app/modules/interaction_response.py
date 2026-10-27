@@ -3,6 +3,7 @@ SLASH_COMMANDS_WITH_CUSTOM_RESPONSE = frozenset({
     "anonimuska",
     "contest",
     "convert",
+    "cookie",
     "giveaway_create",
     "play",
     "recruitment_create",
