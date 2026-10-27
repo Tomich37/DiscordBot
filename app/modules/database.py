@@ -84,19 +84,24 @@ class Database:
         guild_id: int,
         user_id: int,
         rarity: str,
+        opened_on: date,
     ) -> dict | None:
-        """Выбирает случайное предсказание, которое участник ещё не видел на сервере."""
+        """Выбирает вариант, который участник не видел и никто не получал сегодня."""
 
         with Session(autoflush=False, bind=engine) as db:
             seen_prediction_ids = db.query(FortuneCookieOpening.prediction_id).filter(
                 FortuneCookieOpening.guild_id == guild_id,
                 FortuneCookieOpening.user_id == user_id,
             )
+            issued_today_ids = db.query(FortuneCookieOpening.prediction_id).filter(
+                FortuneCookieOpening.opened_on == opened_on,
+            )
             prediction = (
                 db.query(FortuneCookiePrediction)
                 .filter(
                     FortuneCookiePrediction.rarity == rarity,
                     ~FortuneCookiePrediction.id.in_(seen_prediction_ids),
+                    ~FortuneCookiePrediction.id.in_(issued_today_ids),
                 )
                 .order_by(func.random())
                 .first()

@@ -122,45 +122,38 @@ class FortuneCookieCommands(commands.Cog):
                 await inter.response.defer()
 
                 rarity = choose_rarity()
-                cached_prediction = await self.db.get_unseen_fortune_cookie_prediction(
-                    guild_id=inter.guild.id,
-                    user_id=inter.author.id,
-                    rarity=rarity,
-                )
-                prediction = cached_prediction
+                # Выбор и закрепление выполняются под одной блокировкой: пока первый
+                # участник получает вариант, второй не сможет выбрать тот же самый.
+                async with self._generation_locks[rarity]:
+                    cached_prediction = await self.db.get_unseen_fortune_cookie_prediction(
+                        guild_id=inter.guild.id,
+                        user_id=inter.author.id,
+                        rarity=rarity,
+                        opened_on=today,
+                    )
+                    prediction = cached_prediction
 
-                if self._should_generate_prediction(cached_prediction):
-                    async with self._generation_locks[rarity]:
-                        # Пока запрос ждал своей очереди, другой участник мог уже
-                        # создать первый вариант этой редкости.
-                        if cached_prediction is None:
-                            prediction = await self.db.get_unseen_fortune_cookie_prediction(
-                                guild_id=inter.guild.id,
-                                user_id=inter.author.id,
-                                rarity=rarity,
+                    if self._should_generate_prediction(cached_prediction):
+                        try:
+                            prediction = await self._generate_prediction(rarity)
+                        except (FortuneCookieConfigError, FortuneCookieGenerationError) as error:
+                            if cached_prediction is None:
+                                raise
+                            prediction = cached_prediction
+                            self.logger.warning(
+                                "Не удалось пополнить пул печенья, используется кэш: %s",
+                                error,
                             )
 
-                        if prediction is None or cached_prediction is not None:
-                            try:
-                                prediction = await self._generate_prediction(rarity)
-                            except (FortuneCookieConfigError, FortuneCookieGenerationError) as error:
-                                if cached_prediction is None:
-                                    raise
-                                prediction = cached_prediction
-                                self.logger.warning(
-                                    "Не удалось пополнить пул печенья, используется кэш: %s",
-                                    error,
-                                )
+                    if prediction is None:
+                        raise FortuneCookieGenerationError("Не найдено подходящее предсказание.")
 
-                if prediction is None:
-                    raise FortuneCookieGenerationError("Не найдено подходящее предсказание.")
-
-                result = await self.db.claim_fortune_cookie_prediction(
-                    guild_id=inter.guild.id,
-                    user_id=inter.author.id,
-                    prediction_id=prediction["id"],
-                    opened_on=today,
-                )
+                    result = await self.db.claim_fortune_cookie_prediction(
+                        guild_id=inter.guild.id,
+                        user_id=inter.author.id,
+                        prediction_id=prediction["id"],
+                        opened_on=today,
+                    )
                 if result["status"] == "prediction_not_found":
                     raise FortuneCookieGenerationError("Предсказание исчезло до выдачи.")
 
