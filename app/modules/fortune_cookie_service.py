@@ -26,6 +26,56 @@ RARITY_WEIGHTS = {
     "legendary": 2,
 }
 
+MAJOR_ARCANA = (
+    "0 — Шут",
+    "I — Маг",
+    "II — Верховная Жрица",
+    "III — Императрица",
+    "IV — Император",
+    "V — Иерофант",
+    "VI — Влюблённые",
+    "VII — Колесница",
+    "VIII — Сила",
+    "IX — Отшельник",
+    "X — Колесо Фортуны",
+    "XI — Справедливость",
+    "XII — Повешенный",
+    "XIII — Смерть",
+    "XIV — Умеренность",
+    "XV — Дьявол",
+    "XVI — Башня",
+    "XVII — Звезда",
+    "XVIII — Луна",
+    "XIX — Солнце",
+    "XX — Суд",
+    "XXI — Мир",
+)
+
+MINOR_ARCANA_RANKS = (
+    "Туз",
+    "Двойка",
+    "Тройка",
+    "Четвёрка",
+    "Пятёрка",
+    "Шестёрка",
+    "Семёрка",
+    "Восьмёрка",
+    "Девятка",
+    "Десятка",
+    "Паж",
+    "Рыцарь",
+    "Королева",
+    "Король",
+)
+
+MINOR_ARCANA_SUITS = ("Жезлов", "Кубков", "Мечей", "Пентаклей")
+MINOR_ARCANA = tuple(
+    f"{rank} {suit}"
+    for suit in MINOR_ARCANA_SUITS
+    for rank in MINOR_ARCANA_RANKS
+)
+TAROT_ARCANA = MAJOR_ARCANA + MINOR_ARCANA
+
 THEMES = (
     "дружба",
     "творчество",
@@ -132,6 +182,7 @@ class FortuneCookieRecipe:
     tone: str
     time_horizon: str
     image: str
+    arcana: str
     structure: str
 
 
@@ -159,6 +210,7 @@ def build_fortune_cookie_recipe(seed: int, rarity: str) -> FortuneCookieRecipe:
         tone=rng.choice(TONES),
         time_horizon=rng.choice(TIME_HORIZONS),
         image=rng.choice(IMAGES),
+        arcana=rng.choice(TAROT_ARCANA),
         structure=rng.choice(STRUCTURES),
     )
 
@@ -277,6 +329,8 @@ class FortuneCookieGenerator:
         system_prompt = (
             "Ты создаёшь короткие предсказания для печенья в русскоязычном Discord-боте. "
             "Предсказание должно звучать естественно, образно и доброжелательно. "
+            "Используй карты Таро только как метафорические архетипы, а не как буквальное гадание. "
+            "Аркан Смерть означает перемены и завершение этапа, а не физическую смерть. "
             "Не давай категоричных обещаний и не затрагивай смерть, болезни, несчастья, беременность, "
             "расставание, крупные деньги и другие серьёзные события. "
             "Не начинай с формул 'тебя ждёт', 'судьба приготовила' и 'скоро произойдёт'. "
@@ -291,9 +345,12 @@ class FortuneCookieGenerator:
             f"Настроение: {recipe.tone}.\n"
             f"Срок: {recipe.time_horizon}.\n"
             f"Дополнительный образ: {recipe.image}.\n"
+            f"Аркан Таро: {recipe.arcana}.\n"
             f"Композиция: {recipe.structure}.\n"
             f"Длина: от {MIN_WORDS} до {MAX_WORDS} слов, одна строка.\n"
-            "Образ можно использовать буквально или метафорически. Не копируй и не перефразируй "
+            "Возьми традиционный символический смысл аркана за основу предсказания, но не обязан "
+            "называть карту в тексте. Дополнительный образ используй буквально или метафорически. "
+            "Не копируй и не перефразируй "
             f"запрещённые варианты:\n{forbidden_block}"
         )
         return self.chat_payload_class(

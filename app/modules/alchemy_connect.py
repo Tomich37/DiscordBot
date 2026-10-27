@@ -270,6 +270,7 @@ class FortuneCookiePrediction(Base):
     tone = Column(String(40), nullable=False)
     time_horizon = Column(String(80), nullable=False)
     image = Column(String(40), nullable=False)
+    arcana = Column(String(80), nullable=True)
     generation_model = Column(String(80), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
@@ -402,6 +403,17 @@ def ensure_schema_updates():
                         "ALTER TABLE guild_user_stats "
                         "ADD COLUMN stats_started_at TIMESTAMP NOT NULL DEFAULT NOW()"
                     )
+                )
+
+    if "fortune_cookie_predictions" in inspector.get_table_names():
+        columns = {
+            column["name"]
+            for column in inspector.get_columns("fortune_cookie_predictions")
+        }
+        if "arcana" not in columns:
+            with engine.begin() as connection:
+                connection.execute(
+                    text("ALTER TABLE fortune_cookie_predictions ADD COLUMN arcana VARCHAR(80)")
                 )
 
 

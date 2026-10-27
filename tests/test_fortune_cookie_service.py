@@ -5,7 +5,10 @@ from unittest.mock import AsyncMock
 
 from app.modules.fortune_cookie_service import (
     FortuneCookieGenerator,
+    MAJOR_ARCANA,
+    MINOR_ARCANA,
     RARITY_WEIGHTS,
+    TAROT_ARCANA,
     build_fortune_cookie_recipe,
     choose_rarity,
     normalize_prediction_text,
@@ -15,11 +18,18 @@ from app.modules.fortune_cookie_service import (
 
 
 class FortuneCookieServiceTests(unittest.TestCase):
+    def test_tarot_deck_contains_all_unique_arcana(self):
+        self.assertEqual(len(MAJOR_ARCANA), 22)
+        self.assertEqual(len(MINOR_ARCANA), 56)
+        self.assertEqual(len(TAROT_ARCANA), 78)
+        self.assertEqual(len(set(TAROT_ARCANA)), 78)
+
     def test_recipe_is_stable_for_same_seed(self):
         first = build_fortune_cookie_recipe(123456, "rare")
         second = build_fortune_cookie_recipe(123456, "rare")
 
         self.assertEqual(first, second)
+        self.assertIn(first.arcana, TAROT_ARCANA)
 
     def test_recipe_changes_for_another_seed(self):
         first = build_fortune_cookie_recipe(1, "common")
@@ -88,6 +98,7 @@ class FortuneCookieGeneratorTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result["text"], unique)
         self.assertEqual(result["seed"], 321)
+        self.assertEqual(result["arcana"], recipe.arcana)
         self.assertEqual(generator._request_prediction_with_limit.await_count, 2)
 
 

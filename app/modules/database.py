@@ -52,6 +52,7 @@ class Database:
             "tone": prediction.tone,
             "time_horizon": prediction.time_horizon,
             "image": prediction.image,
+            "arcana": prediction.arcana,
             "generation_model": prediction.generation_model,
         }
 
@@ -117,7 +118,9 @@ class Database:
                     ~FortuneCookiePrediction.id.in_(issued_today_ids),
                     ~FortuneCookiePrediction.id.in_(archived_today_ids),
                 )
-                .order_by(func.random())
+                # Сначала используем новые предсказания с Таро, а старые записи
+                # без аркана оставляем безопасным резервом при сбое генератора.
+                .order_by(FortuneCookiePrediction.arcana.is_(None), func.random())
                 .first()
             )
             return self._serialize_cookie_prediction(prediction) if prediction else None

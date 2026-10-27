@@ -45,6 +45,8 @@ def _build_cookie_embed(prediction: dict, repeated: bool = False) -> disnake.Emb
     )
     embed.add_field(name="Редкость", value=rarity_name, inline=True)
     embed.add_field(name="Образ", value=prediction["image"].capitalize(), inline=True)
+    if prediction.get("arcana"):
+        embed.add_field(name="Аркан", value=prediction["arcana"], inline=False)
     embed.set_footer(text=f"Номер предсказания: {prediction['seed']}")
     return embed
 
@@ -77,6 +79,8 @@ class FortuneCookieCommands(commands.Cog):
 
     def _should_generate_prediction(self, cached_prediction: dict | None) -> bool:
         if cached_prediction is None:
+            return True
+        if not cached_prediction.get("arcana"):
             return True
         return secrets.randbelow(100) < self.new_prediction_percent
 

@@ -4,7 +4,10 @@ from datetime import date
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from app.modules.cogs.fortune_cookie_commands import FortuneCookieCommands
+from app.modules.cogs.fortune_cookie_commands import (
+    FortuneCookieCommands,
+    _build_cookie_embed,
+)
 
 
 class FakeResponse:
@@ -34,6 +37,20 @@ class FakeDatabase:
 
 
 class FortuneCookieCommandTests(unittest.IsolatedAsyncioTestCase):
+    async def test_embed_shows_arcana(self) -> None:
+        embed = _build_cookie_embed(
+            {
+                "seed": 101,
+                "text": "Знакомая дорога сегодня поможет заметить новую возможность.",
+                "rarity": "common",
+                "image": "фонарь",
+                "arcana": "XIX — Солнце",
+            }
+        )
+
+        fields = {field.name: field.value for field in embed.fields}
+        self.assertEqual(fields["Аркан"], "XIX — Солнце")
+
     async def test_interaction_is_deferred_before_database_query(self) -> None:
         interaction = SimpleNamespace(
             guild=SimpleNamespace(id=1),
