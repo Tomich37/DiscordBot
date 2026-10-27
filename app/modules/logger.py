@@ -72,6 +72,26 @@ class Utf8SafeFormatter(logging.Formatter):
             record.args = original_args
 
 
+class Utf8ConsoleHandler(logging.StreamHandler):
+    """Пишет в Docker байты UTF-8, не полагаясь на кодировку текстового потока."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            message = f"{self.format(record)}{self.terminator}"
+            binary_stream = getattr(self.stream, "buffer", None)
+            if binary_stream is not None:
+                binary_stream.write(message.encode("utf-8", errors="backslashreplace"))
+                binary_stream.flush()
+                return
+
+            self.stream.write(message)
+            self.flush()
+        except RecursionError:
+            raise
+        except Exception:
+            self.handleError(record)
+
+
 class LevelFilter(logging.Filter):
     def __init__(self, allowed_levels: set[int]) -> None:
         super().__init__()
@@ -178,9 +198,10 @@ class SetLogs:
         technical_handler.addFilter(LevelFilter(technical_levels))
         technical_handler.setFormatter(formatter)
 
-        # Docker и локальный Windows-терминал могут выбирать разные кодировки.
-        # Явный UTF-8 не даёт кириллице превратиться в символы замены в stdout.
-        console_handler = logging.StreamHandler(configure_utf8_stream(sys.stdout))
+        # stderr настраиваем для предупреждений Python и сторонних библиотек.
+        # Основной лог пишется сразу байтами UTF-8, минуя кодировку оболочки.
+        configure_utf8_stream(sys.stderr)
+        console_handler = Utf8ConsoleHandler(configure_utf8_stream(sys.stdout))
         console_handler.setLevel(logging.DEBUG if debug_enabled else logging.INFO)
         console_handler.setFormatter(formatter)
 
@@ -196,3 +217,6 @@ class SetLogs:
             external_logger.handlers.clear()
             external_logger.addHandler(technical_handler)
             external_logger.addHandler(console_handler)
+
+        # Контрольная строка позволяет сразу увидеть кодировку после запуска контейнера.
+        self.logger.info("Система логирования запущена в UTF-8.")

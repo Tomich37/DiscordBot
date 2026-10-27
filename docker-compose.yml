@@ -47,8 +47,6 @@ services:
     networks:
       - discord_network
     restart: unless-stopped
-    stdin_open: true
-    tty: true
 
 volumes:
   pg_data:
