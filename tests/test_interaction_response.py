@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 from app.modules.interaction_response import (
     acknowledge_slash_command,
+    get_interaction_command_name,
     send_interaction_response,
 )
 
@@ -42,6 +43,19 @@ class FakeInteraction:
         self.sent_response = (args, kwargs)
 
 
+class FakeCommandOption:
+    def __init__(self, name: str, value=None, options=None) -> None:
+        self.name = name
+        self.value = value
+        self.options = options or []
+
+
+class FakeCommandData:
+    def __init__(self, name: str, options=None) -> None:
+        self.name = name
+        self.options = options or []
+
+
 class InteractionResponseTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.bot = SimpleNamespace(_deferred_interactions={})
@@ -54,6 +68,42 @@ class InteractionResponseTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(interaction.response.done)
         self.assertFalse(interaction.response.ephemeral)
         self.assertEqual(self.bot._deferred_interactions[interaction.id], False)
+
+    async def test_command_name_is_built_from_real_discord_option_tree(self) -> None:
+        interaction = FakeInteraction(10)
+        interaction.application_command = SimpleNamespace(
+            name="add",
+            qualified_name="add",
+        )
+        interaction.data = FakeCommandData(
+            "sport",
+            options=[
+                FakeCommandOption(
+                    "add",
+                    options=[
+                        FakeCommandOption("challenge", value="10к шагов"),
+                        FakeCommandOption("amount", value=500),
+                    ],
+                )
+            ],
+        )
+
+        command_name = get_interaction_command_name(interaction)
+
+        self.assertEqual(command_name, "sport add")
+
+    async def test_real_sport_join_payload_is_acknowledged_ephemerally(self) -> None:
+        interaction = FakeInteraction(11)
+        interaction.data = FakeCommandData(
+            "sport",
+            options=[FakeCommandOption("join", options=[])],
+        )
+
+        command_name = get_interaction_command_name(interaction)
+        await acknowledge_slash_command(self.bot, interaction, command_name)
+
+        self.assertTrue(interaction.response.done)
+        self.assertTrue(interaction.response.ephemeral)
 
     async def test_personal_command_is_acknowledged_ephemerally(self) -> None:
         interaction = FakeInteraction(4)
@@ -69,6 +119,53 @@ class InteractionResponseTest(unittest.IsolatedAsyncioTestCase):
         await acknowledge_slash_command(self.bot, interaction, "anonimuska")
 
         self.assertFalse(interaction.response.done)
+
+    async def test_sport_private_subcommand_is_acknowledged_ephemerally(self) -> None:
+        interaction = FakeInteraction(7)
+
+        await acknowledge_slash_command(self.bot, interaction, "sport join")
+
+        self.assertTrue(interaction.response.done)
+        self.assertTrue(interaction.response.ephemeral)
+
+    async def test_sport_private_response_does_not_create_public_placeholder(self) -> None:
+        interaction = FakeInteraction(8)
+        interaction.bot = self.bot
+
+        await acknowledge_slash_command(self.bot, interaction, "sport add")
+        await send_interaction_response(
+            interaction,
+            "Результат добавлен.",
+            ephemeral=True,
+        )
+
+        self.assertEqual(interaction.calls, [])
+        self.assertEqual(
+            interaction.sent_response,
+            (("Результат добавлен.",), {"ephemeral": True}),
+        )
+        self.assertIsNone(interaction.edited_response)
+
+    async def test_sport_add_success_can_be_public(self) -> None:
+        interaction = FakeInteraction(12)
+        interaction.bot = self.bot
+
+        await acknowledge_slash_command(self.bot, interaction, "sport add")
+        await send_interaction_response(interaction, "Публичный результат")
+
+        self.assertFalse(interaction.response.done)
+        self.assertEqual(
+            interaction.sent_response,
+            (("Публичный результат",), {}),
+        )
+
+    async def test_sport_status_remains_public(self) -> None:
+        interaction = FakeInteraction(9)
+
+        await acknowledge_slash_command(self.bot, interaction, "sport status")
+
+        self.assertTrue(interaction.response.done)
+        self.assertFalse(interaction.response.ephemeral)
 
     async def test_public_deferred_response_edits_original_command(self) -> None:
         interaction = FakeInteraction(2)

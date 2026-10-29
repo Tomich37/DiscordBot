@@ -373,6 +373,63 @@ class TrackedAnonimusChannel(Base):
     guild_id = Column(BigInteger, nullable=False)
     channel_id = Column(BigInteger, nullable=False, unique=True)
     is_active = Column(Boolean, default=True)
+
+
+class SportChallenge(Base):
+    """Совместная спортивная цель сервера."""
+
+    __tablename__ = "sport_challenges"
+
+    id = Column(Integer, primary_key=True, index=True)
+    guild_id = Column(BigInteger, nullable=False, index=True)
+    channel_id = Column(BigInteger, nullable=False, index=True)
+    creator_id = Column(BigInteger, nullable=False)
+    activity_name = Column(String(100), nullable=False)
+    unit_name = Column(String(30), nullable=False)
+    target_amount = Column(BigInteger, nullable=False)
+    status = Column(String(20), default="active", nullable=False, index=True)
+    started_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    ends_at = Column(DateTime, nullable=False, index=True)
+    finished_at = Column(DateTime, nullable=True)
+    finish_reason = Column(String(20), nullable=True)
+    result_announced = Column(Boolean, default=False, nullable=False, index=True)
+    last_summary_on = Column(Date, nullable=True, index=True)
+
+
+class SportParticipant(Base):
+    """Участник, записавшийся в спортивный челлендж."""
+
+    __tablename__ = "sport_participants"
+    __table_args__ = (
+        UniqueConstraint("challenge_id", "user_id", name="uq_sport_participant"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    challenge_id = Column(
+        Integer,
+        ForeignKey("sport_challenges.id"),
+        nullable=False,
+        index=True,
+    )
+    user_id = Column(BigInteger, nullable=False, index=True)
+    joined_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class SportProgressEntry(Base):
+    """Одна отметка участника с выполненным объёмом."""
+
+    __tablename__ = "sport_progress_entries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    challenge_id = Column(
+        Integer,
+        ForeignKey("sport_challenges.id"),
+        nullable=False,
+        index=True,
+    )
+    user_id = Column(BigInteger, nullable=False, index=True)
+    amount = Column(BigInteger, nullable=False)
+    recorded_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
   
 def ensure_schema_updates():
     inspector = inspect(engine)
@@ -424,6 +481,27 @@ def ensure_schema_updates():
                         "ADD COLUMN style_version INTEGER NOT NULL DEFAULT 1"
                     )
                 )
+
+    if "sport_challenges" in inspector.get_table_names():
+        columns = {
+            column["name"]
+            for column in inspector.get_columns("sport_challenges")
+        }
+        if "last_summary_on" not in columns:
+            with engine.begin() as connection:
+                connection.execute(
+                    text("ALTER TABLE sport_challenges ADD COLUMN last_summary_on DATE")
+                )
+
+        # Одно активное название в канале должно однозначно указывать на цель.
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_sport_active_name "
+                    "ON sport_challenges (guild_id, channel_id, lower(activity_name)) "
+                    "WHERE status = 'active'"
+                )
+            )
 
 
 # Создаём таблицы и добавляем недостающие колонки для уже существующей БД.

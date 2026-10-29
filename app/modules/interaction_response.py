@@ -7,18 +7,65 @@ SLASH_COMMANDS_WITH_CUSTOM_RESPONSE = frozenset({
     "giveaway_create",
     "play",
     "recruitment_create",
+    "sport add",
 })
 
 EPHEMERAL_SLASH_COMMANDS = frozenset({
     "alchemy_inventory",
     "alchemy_recipes",
     "balance",
+    "sport create",
+    "sport finish",
+    "sport join",
 })
+
+
+def get_interaction_command_name(inter) -> str:
+    """Извлекает полный путь команды из payload Discord: например, `sport add`."""
+
+    data = getattr(inter, "data", None)
+    root_name = getattr(data, "name", None)
+    if root_name:
+        # У объектов Disnake этот метод штатно возвращает цепочку групп и подкоманд.
+        chain_getter = getattr(data, "_get_chain_and_kwargs", None)
+        if callable(chain_getter):
+            chain, _ = chain_getter()
+            return " ".join((root_name, *chain))
+
+        # Запасной путь полезен для совместимости и тестовых interaction-объектов.
+        command_parts = [root_name]
+        options = getattr(data, "options", None) or []
+        while options:
+            option = options[0]
+            value = getattr(option, "value", None)
+            if value is not None:
+                break
+            option_name = getattr(option, "name", None)
+            if not option_name:
+                break
+            command_parts.append(option_name)
+            options = getattr(option, "options", None) or []
+        return " ".join(command_parts)
+
+    command = getattr(inter, "application_command", None)
+    if command and getattr(command, "qualified_name", None):
+        return command.qualified_name
+    if command and getattr(command, "name", None):
+        return command.name
+
+    if data and getattr(data, "custom_id", None):
+        return data.custom_id
+    return "неизвестно"
 
 
 async def acknowledge_slash_command(bot, inter, command_name: str) -> None:
     """Подтверждает обычную слеш-команду до начала долгой работы."""
-    if command_name in SLASH_COMMANDS_WITH_CUSTOM_RESPONSE or inter.response.is_done():
+    root_command_name = command_name.split(maxsplit=1)[0]
+    if (
+        command_name in SLASH_COMMANDS_WITH_CUSTOM_RESPONSE
+        or root_command_name in SLASH_COMMANDS_WITH_CUSTOM_RESPONSE
+        or inter.response.is_done()
+    ):
         return
 
     ephemeral = command_name in EPHEMERAL_SLASH_COMMANDS

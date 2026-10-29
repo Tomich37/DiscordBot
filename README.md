@@ -12,6 +12,7 @@ Emilia — русскоязычный Discord-бот на Python и [disnake](ht
 - анонимные публикации с изображениями, PDF- и TXT-файлами;
 - конвертация видео в MOV или GIF через slash-команду и контекстное меню;
 - суточная статистика сообщений по выбранным каналам;
+- несколько одновременных спортивных челленджей в одном канале с выбором по названию, общей целью, отметками и итоговым рейтингом;
 - закрытые служебные команды владельца: роли, логи, серверы, каналы и выгрузка истории;
 - раздельные пользовательские и технические логи с ежедневной ротацией.
 
@@ -71,7 +72,7 @@ flowchart TD
 
 | Раздел | Команды |
 |---|---|
-| Справка и утилиты | `/help`, `/help_command`, `/ping`, `/profile`, `/leaderboard`, `/avatar`, `/banner`, `/server_info` |
+| Справка и утилиты | `/help`, `/help_command`, `/ping`, `/profile`, `/leaderboard`, `/sport`, `/avatar`, `/banner`, `/server_info` |
 | Алхимия | `/alchemy_start`, `/daily`, `/balance`, `/alchemy_combine`, `/alchemy_inventory`, `/alchemy_recipes` |
 | Музыка | `/play`, `/skip`, `/stop`, `/pause`, `/resume`, `/queue`, `/leave` |
 | Публикации и файлы | `/convert`, `/anonimuska`, контекстные команды `Convert Video` и `Convert Video to GIF` |
@@ -135,6 +136,8 @@ LOGS_DIR=app/modules/logs
 | `ALCHEMY_START_BALANCE` | нет | `50` | стартовый баланс игрока |
 | `DAILY_REWARD` | нет | `25` | ежедневная награда; поддерживается старое имя `ALCHEMY_DAILY_REWARD` |
 | `ALCHEMY_COMBINE_COST` | нет | `5` | стоимость одного сочетания |
+| `SPORT_TIMEZONE` | нет | `Asia/Tomsk` | часовой пояс ежедневных спортивных сводок |
+| `SPORT_SUMMARY_HOUR` | нет | `21` | час публикации ежедневной сводки от `0` до `23` |
 | `FFMPEG_PATH` | нет | автоопределение | явный путь к исполняемому файлу FFmpeg |
 | `LOGS_DIR` | нет | `app/modules/logs` | каталог ежедневных логов |
 | `DEBUG_LOGS` | нет | `false` | запись debug-сообщений в технический лог |
