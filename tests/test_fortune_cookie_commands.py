@@ -1,8 +1,9 @@
 import asyncio
 import unittest
-from datetime import date
+from datetime import date, datetime
 from types import SimpleNamespace
 from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
 from app.modules.cogs.fortune_cookie_commands import (
     FortuneCookieCommands,
@@ -52,6 +53,7 @@ class FortuneCookieCommandTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_embed_shows_arcana(self) -> None:
+        next_available_at = datetime(2026, 10, 30, 0, 0, tzinfo=ZoneInfo("Asia/Tomsk"))
         embed = _build_cookie_embed(
             {
                 "seed": 101,
@@ -59,11 +61,28 @@ class FortuneCookieCommandTests(unittest.IsolatedAsyncioTestCase):
                 "rarity": "common",
                 "image": "фонарь",
                 "arcana": "XIX — Солнце",
-            }
+            },
+            next_available_at=next_available_at,
         )
 
         fields = {field.name: field.value for field in embed.fields}
         self.assertEqual(fields["Аркан"], "XIX — Солнце")
+        timestamp = int(next_available_at.timestamp())
+        self.assertEqual(
+            fields["Следующее печенье"],
+            f"Новая попытка <t:{timestamp}:R>\nСброс: <t:{timestamp}:F>",
+        )
+
+    async def test_next_attempt_starts_at_local_midnight(self) -> None:
+        cog = object.__new__(FortuneCookieCommands)
+        cog.timezone = ZoneInfo("Asia/Tomsk")
+
+        next_available_at = cog._next_available_at(date(2026, 10, 29))
+
+        self.assertEqual(
+            next_available_at,
+            datetime(2026, 10, 30, 0, 0, tzinfo=ZoneInfo("Asia/Tomsk")),
+        )
 
     async def test_interaction_is_deferred_before_database_query(self) -> None:
         interaction = SimpleNamespace(
@@ -81,6 +100,7 @@ class FortuneCookieCommandTests(unittest.IsolatedAsyncioTestCase):
         cog = object.__new__(FortuneCookieCommands)
         cog._user_locks = {}
         cog._generation_locks = {"common": asyncio.Lock()}
+        cog.timezone = ZoneInfo("Asia/Tomsk")
         cog._today = lambda: date(2026, 10, 27)
         cog.db = FakeDatabase(interaction)
         cog.logger = SimpleNamespace(warning=lambda *args: None, exception=lambda *args: None)

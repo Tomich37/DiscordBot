@@ -1,7 +1,7 @@
 import asyncio
 import os
 import secrets
-from datetime import datetime
+from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import disnake
@@ -33,7 +33,11 @@ def _read_generation_percent(default: int = 10) -> int:
     return min(100, max(0, value))
 
 
-def _build_cookie_embed(prediction: dict, repeated: bool = False) -> disnake.Embed:
+def _build_cookie_embed(
+    prediction: dict,
+    repeated: bool = False,
+    next_available_at: datetime | None = None,
+) -> disnake.Embed:
     rarity_name, color = RARITY_PRESENTATION.get(
         prediction["rarity"],
         ("Неизвестное", 0x95A5A6),
@@ -48,6 +52,14 @@ def _build_cookie_embed(prediction: dict, repeated: bool = False) -> disnake.Emb
     embed.add_field(name="Образ", value=prediction["image"].capitalize(), inline=True)
     if prediction.get("arcana"):
         embed.add_field(name="Аркан", value=prediction["arcana"], inline=False)
+    if next_available_at:
+        relative_time = disnake.utils.format_dt(next_available_at, style="R")
+        exact_time = disnake.utils.format_dt(next_available_at, style="F")
+        embed.add_field(
+            name="Следующее печенье",
+            value=f"Новая попытка {relative_time}\nСброс: {exact_time}",
+            inline=False,
+        )
     embed.set_footer(text=f"Номер предсказания: {prediction['seed']}")
     return embed
 
@@ -78,6 +90,15 @@ class FortuneCookieCommands(commands.Cog):
     def _today(self):
         return datetime.now(self.timezone).date()
 
+    def _next_available_at(self, today: date) -> datetime:
+        """Возвращает ближайшую полночь в часовом поясе печенья."""
+
+        return datetime.combine(
+            today + timedelta(days=1),
+            time.min,
+            tzinfo=self.timezone,
+        )
+
     def _should_generate_prediction(self, cached_prediction: dict | None) -> bool:
         if cached_prediction is None:
             return True
@@ -101,6 +122,7 @@ class FortuneCookieCommands(commands.Cog):
     )
     async def cookie(self, inter: disnake.GuildCommandInteraction):
         today = self._today()
+        next_available_at = self._next_available_at(today)
         user_key = (inter.guild.id, inter.author.id)
         user_lock = self._user_locks.setdefault(user_key, asyncio.Lock())
 
@@ -125,7 +147,11 @@ class FortuneCookieCommands(commands.Cog):
                 )
                 if current:
                     await inter.edit_original_response(
-                        embed=_build_cookie_embed(current, repeated=True),
+                        embed=_build_cookie_embed(
+                            current,
+                            repeated=True,
+                            next_available_at=next_available_at,
+                        ),
                     )
                     return
 
@@ -169,6 +195,7 @@ class FortuneCookieCommands(commands.Cog):
                     embed=_build_cookie_embed(
                         result,
                         repeated=result["status"] == "already_claimed",
+                        next_available_at=next_available_at,
                     )
                 )
             except (FortuneCookieConfigError, FortuneCookieGenerationError) as error:
