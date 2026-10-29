@@ -6,11 +6,18 @@ from unittest.mock import AsyncMock
 from app.modules.fortune_cookie_service import (
     COOKIE_STYLE_VERSION,
     FortuneCookieGenerator,
+    HUMOR_INTENSITY_WEIGHTS,
+    HUMOR_STYLES,
+    HUMOR_STYLES_BY_INTENSITY,
     IMAGES,
+    IMAGE_USAGE_MODES,
     MAJOR_ARCANA,
     MINOR_ARCANA,
+    OPENING_STYLES,
+    OPENING_STYLES_BY_INTENSITY,
     RARITY_WEIGHTS,
     TAROT_ARCANA,
+    TONES,
     build_fortune_cookie_recipe,
     choose_rarity,
     normalize_prediction_text,
@@ -30,12 +37,50 @@ class FortuneCookieServiceTests(unittest.TestCase):
         self.assertGreaterEqual(len(IMAGES), 100)
         self.assertEqual(len(IMAGES), len(set(IMAGES)))
 
+    def test_humor_recipe_has_independent_variety_axes(self):
+        self.assertGreaterEqual(len(TONES), 16)
+        self.assertGreaterEqual(len(HUMOR_STYLES), 12)
+        self.assertEqual(len(HUMOR_INTENSITY_WEIGHTS), 5)
+        self.assertGreaterEqual(len(IMAGE_USAGE_MODES), 8)
+        self.assertGreaterEqual(len(OPENING_STYLES), 10)
+        self.assertIn("1/5 — лёгкая улыбка", HUMOR_INTENSITY_WEIGHTS)
+        self.assertIn("5/5 — безжалостная сатира", HUMOR_INTENSITY_WEIGHTS)
+
     def test_recipe_is_stable_for_same_seed(self):
         first = build_fortune_cookie_recipe(123456, "rare")
         second = build_fortune_cookie_recipe(123456, "rare")
 
         self.assertEqual(first, second)
         self.assertIn(first.arcana, TAROT_ARCANA)
+        self.assertIn(first.tone, TONES)
+        self.assertIn(first.humor_style, HUMOR_STYLES)
+        self.assertIn(first.humor_intensity, HUMOR_INTENSITY_WEIGHTS)
+        self.assertIn(
+            first.humor_style,
+            HUMOR_STYLES_BY_INTENSITY[first.humor_intensity],
+        )
+        self.assertIn(
+            first.opening_style,
+            OPENING_STYLES_BY_INTENSITY[first.humor_intensity],
+        )
+
+    def test_prompt_contains_selected_humor_controls(self):
+        generator = FortuneCookieGenerator.__new__(FortuneCookieGenerator)
+        generator.model = "test-model"
+        generator.chat_payload_class = lambda **kwargs: SimpleNamespace(**kwargs)
+        generator.message_class = lambda **kwargs: SimpleNamespace(**kwargs)
+        generator.role_class = SimpleNamespace(SYSTEM="system", USER="user")
+        recipe = build_fortune_cookie_recipe(777, "rare")
+
+        payload = generator._build_prompt(recipe, ())
+        user_prompt = payload.messages[1].content
+
+        self.assertIn(f"Стиль юмора: {recipe.humor_style}", user_prompt)
+        self.assertIn(f"Жёсткость юмора: {recipe.humor_intensity}", user_prompt)
+        self.assertIn(f"Цель подколки: {recipe.roast_target}", user_prompt)
+        self.assertIn(f"Приём сатиры: {recipe.satire_device}", user_prompt)
+        self.assertIn(f"Использование образа: {recipe.image_usage}", user_prompt)
+        self.assertIn(f"Форма начала: {recipe.opening_style}", user_prompt)
 
     def test_recipe_changes_for_another_seed(self):
         first = build_fortune_cookie_recipe(1, "common")
@@ -57,12 +102,12 @@ class FortuneCookieServiceTests(unittest.TestCase):
         self.assertEqual(normalized, "ключ откроет новое окно")
 
     def test_validation_accepts_safe_prediction(self):
-        text = "Сегодня знакомый разговор поможет заметить полезную возможность совсем рядом."
+        text = "Знакомый разговор внезапно закончится настолько удачно, что даже чайник одобрит."
 
         self.assertEqual(validate_prediction_text(text), text)
 
     def test_validation_rejects_template_phrase(self):
-        text = "Сегодня тебя ждёт удивительная встреча, которая мягко изменит привычный маршрут."
+        text = "Вечером тебя ждёт удивительная встреча, которая мягко изменит привычный маршрут."
 
         with self.assertRaisesRegex(ValueError, "шаблонную"):
             validate_prediction_text(text)
@@ -71,6 +116,12 @@ class FortuneCookieServiceTests(unittest.TestCase):
         text = "Судьба распорядилась так, что сегодня твой тапок внезапно станет главным советчиком."
 
         with self.assertRaisesRegex(ValueError, "шаблонную"):
+            validate_prediction_text(text)
+
+    def test_validation_rejects_repetitive_time_opening(self):
+        text = "Сегодня твой будильник признает поражение и торжественно уйдёт в отпуск."
+
+        with self.assertRaisesRegex(ValueError, "шаблонное начало"):
             validate_prediction_text(text)
 
     def test_validation_rejects_lexically_similar_prediction(self):
@@ -112,6 +163,9 @@ class FortuneCookieGeneratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["seed"], 321)
         self.assertEqual(result["arcana"], recipe.arcana)
         self.assertEqual(result["style_version"], COOKIE_STYLE_VERSION)
+        self.assertNotIn("humor_intensity", result)
+        self.assertNotIn("roast_target", result)
+        self.assertNotIn("satire_device", result)
         self.assertEqual(generator._request_prediction_with_limit.await_count, 2)
 
 
