@@ -81,6 +81,8 @@ class FortuneCookieServiceTests(unittest.TestCase):
         self.assertIn(f"Приём сатиры: {recipe.satire_device}", user_prompt)
         self.assertIn(f"Использование образа: {recipe.image_usage}", user_prompt)
         self.assertIn(f"Форма начала: {recipe.opening_style}", user_prompt)
+        self.assertIn("ОБЯЗАТЕЛЬНО: опиши событие", user_prompt)
+        self.assertIn("Маркер не обязан стоять в начале", user_prompt)
 
     def test_recipe_changes_for_another_seed(self):
         first = build_fortune_cookie_recipe(1, "common")
@@ -123,6 +125,17 @@ class FortuneCookieServiceTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "шаблонное начало"):
             validate_prediction_text(text)
+
+    def test_validation_rejects_satirical_caption_without_future_event(self):
+        text = "Идеальный план года получил антипремию за максимальный разрыв с суровой реальностью."
+
+        with self.assertRaisesRegex(ValueError, "не описывает будущее"):
+            validate_prediction_text(text)
+
+    def test_validation_accepts_satire_that_predicts_future_event(self):
+        text = "Скоро твой идеальный план встретится с реальностью и назовёт поражение гибкой стратегией."
+
+        self.assertEqual(validate_prediction_text(text), text)
 
     def test_validation_rejects_lexically_similar_prediction(self):
         existing = "Обычный разговор поможет тебе заметить полезную возможность совсем рядом."
