@@ -1,4 +1,6 @@
-from datetime import datetime, timedelta, timezone
+import os
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import disnake
 from disnake.ext import commands, tasks
@@ -8,6 +10,7 @@ from app.modules.interaction_response import send_interaction_response
 
 SPORT_COLOR = 0x2ECC71
 FINAL_SPORT_COLOR = 0xF1C40F
+DAILY_SPORT_COLOR = 0x3498DB
 
 
 def _discord_datetime(value: datetime) -> datetime:
@@ -38,6 +41,22 @@ def _leaderboard_text(rows: list[dict], unit_name: str) -> str:
     )
 
 
+def _read_summary_hour(default: int = 21) -> int:
+    """Читает час публикации и ограничивает его диапазоном суток."""
+
+    try:
+        value = int(os.getenv("SPORT_SUMMARY_HOUR", str(default)))
+    except ValueError:
+        return default
+    return min(23, max(0, value))
+
+
+def _utc_naive(value: datetime) -> datetime:
+    """Переводит локальное aware-время в формат UTC, используемый БД."""
+
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
 class SportCommands(commands.Cog):
     """Команды совместных спортивных челленджей."""
 
@@ -45,6 +64,16 @@ class SportCommands(commands.Cog):
         self.bot = bot
         self.logger = logger
         self.db = bot.async_db
+        self.summary_hour = _read_summary_hour()
+        timezone_name = os.getenv("SPORT_TIMEZONE", "Asia/Tomsk")
+        try:
+            self.sport_timezone = ZoneInfo(timezone_name)
+        except ZoneInfoNotFoundError:
+            self.logger.warning(
+                "Часовой пояс SPORT_TIMEZONE=%s не найден, используется Asia/Tomsk.",
+                timezone_name,
+            )
+            self.sport_timezone = ZoneInfo("Asia/Tomsk")
         self.check_sport_deadlines.start()
 
     def cog_unload(self):
@@ -219,9 +248,11 @@ class SportCommands(commands.Cog):
         updated = result["challenge"]
         await send_interaction_response(
             inter,
-            f"В **{updated['activity_name']}** добавлено **{amount:,} {updated['unit_name']}**. "
-            f"Общий прогресс: **{result['total_amount']:,} / {updated['target_amount']:,}**.",
-            ephemeral=True,
+            embed=self._build_progress_entry_embed(
+                updated,
+                user_id=inter.author.id,
+                amount=amount,
+            ),
         )
         if result["status"] == "completed":
             await self._publish_final_results(updated)
@@ -350,6 +381,75 @@ class SportCommands(commands.Cog):
         return embed
 
     @staticmethod
+    def _build_progress_entry_embed(
+        challenge: dict,
+        user_id: int,
+        amount: int,
+    ) -> disnake.Embed:
+        """Публично показывает новую активность участника."""
+
+        current = challenge.get("total_amount", 0)
+        target = challenge["target_amount"]
+        remaining = max(target - current, 0)
+        embed = disnake.Embed(
+            title="🏃 Новый спортивный результат",
+            description=(
+                f"<@{user_id}> добавляет **{amount:,} {challenge['unit_name']}** "
+                f"в челлендж **{challenge['activity_name']}**."
+            ),
+            color=SPORT_COLOR,
+        )
+        embed.add_field(
+            name="Общий прогресс",
+            value=f"**{current:,} / {target:,}** {challenge['unit_name']}",
+            inline=True,
+        )
+        embed.add_field(
+            name="Осталось",
+            value=f"**{remaining:,}** {challenge['unit_name']}",
+            inline=True,
+        )
+        return embed
+
+    @staticmethod
+    def _build_daily_summary_embed(
+        challenge: dict,
+        rows: list[dict],
+        summary_on: date,
+    ) -> disnake.Embed:
+        """Формирует ежедневный топ и остаток до общей цели."""
+
+        current = challenge.get("total_amount", 0)
+        target = challenge["target_amount"]
+        remaining = max(target - current, 0)
+        embed = disnake.Embed(
+            title="📊 Ежедневная спортивная сводка",
+            description=f"Челлендж **{challenge['activity_name']}**",
+            color=DAILY_SPORT_COLOR,
+        )
+        embed.add_field(
+            name="Топ-5 за день",
+            value=(
+                _leaderboard_text(rows, challenge["unit_name"])
+                if rows
+                else "Сегодня ещё никто не добавил результат."
+            ),
+            inline=False,
+        )
+        embed.add_field(
+            name="Осталось до цели",
+            value=f"**{remaining:,}** {challenge['unit_name']}",
+            inline=False,
+        )
+        embed.add_field(
+            name="Общий прогресс",
+            value=f"**{current:,} / {target:,}** {challenge['unit_name']}",
+            inline=False,
+        )
+        embed.set_footer(text=f"Сводка за {summary_on:%d.%m.%Y}")
+        return embed
+
+    @staticmethod
     def _build_leaderboard_embed(challenge: dict, rows: list[dict], final: bool = False) -> disnake.Embed:
         title = "🏆 Итоги спортивного челленджа" if final else "🏅 Спортивный рейтинг"
         embed = disnake.Embed(
@@ -402,11 +502,67 @@ class SportCommands(commands.Cog):
         for challenge in await self.db.get_unannounced_sport_challenges():
             await self._publish_final_results(challenge)
 
+    async def _publish_daily_summaries(self):
+        local_now = datetime.now(self.sport_timezone)
+        scheduled_local = local_now.replace(
+            hour=self.summary_hour,
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
+        if local_now < scheduled_local:
+            return
+
+        summary_on = local_now.date()
+        period_start = _utc_naive(
+            local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+        )
+        period_end = _utc_naive(local_now)
+        challenges = await self.db.get_sport_challenges_for_daily_summary(
+            summary_on=summary_on,
+            scheduled_at=_utc_naive(scheduled_local),
+        )
+        for challenge in challenges:
+            rows = await self.db.get_sport_daily_leaderboard(
+                challenge_id=challenge["id"],
+                period_start=period_start,
+                period_end=period_end,
+                limit=5,
+            )
+            channel = self.bot.get_channel(challenge["channel_id"])
+            if channel is None:
+                try:
+                    channel = await self.bot.fetch_channel(challenge["channel_id"])
+                except (disnake.NotFound, disnake.Forbidden, disnake.HTTPException):
+                    self.logger.exception(
+                        "Не удалось найти канал для ежедневной сводки челленджа %s",
+                        challenge["id"],
+                    )
+                    continue
+
+            try:
+                await channel.send(
+                    embed=self._build_daily_summary_embed(
+                        challenge,
+                        rows,
+                        summary_on,
+                    )
+                )
+            except (disnake.Forbidden, disnake.HTTPException):
+                self.logger.exception(
+                    "Не удалось опубликовать ежедневную сводку челленджа %s",
+                    challenge["id"],
+                )
+                continue
+
+            await self.db.mark_sport_daily_summary(challenge["id"], summary_on)
+
     @tasks.loop(seconds=60)
     async def check_sport_deadlines(self):
         try:
             await self.db.finish_expired_sport_challenges(datetime.utcnow())
             await self._publish_pending_results()
+            await self._publish_daily_summaries()
         except Exception:
             self.logger.exception("Ошибка фоновой проверки спортивных челленджей")
 

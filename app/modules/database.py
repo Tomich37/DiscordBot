@@ -1653,6 +1653,7 @@ class Database:
             "finished_at": challenge.finished_at,
             "finish_reason": challenge.finish_reason,
             "result_announced": challenge.result_announced,
+            "last_summary_on": challenge.last_summary_on,
             "total_amount": int(total_amount or 0),
         }
 
@@ -1948,6 +1949,72 @@ class Database:
                 .all()
             )
             return [{"user_id": user_id, "total_amount": int(total or 0)} for user_id, total in rows]
+
+    def get_sport_daily_leaderboard(
+        self,
+        challenge_id: int,
+        period_start: datetime,
+        period_end: datetime,
+        limit: int = 5,
+    ) -> list[dict]:
+        """Возвращает лидеров по отметкам внутри выбранного периода UTC."""
+
+        with Session(autoflush=False, bind=engine) as db:
+            rows = (
+                db.query(
+                    SportProgressEntry.user_id,
+                    func.sum(SportProgressEntry.amount).label("total"),
+                )
+                .filter(
+                    SportProgressEntry.challenge_id == challenge_id,
+                    SportProgressEntry.recorded_at >= period_start,
+                    SportProgressEntry.recorded_at < period_end,
+                )
+                .group_by(SportProgressEntry.user_id)
+                .order_by(func.sum(SportProgressEntry.amount).desc(), SportProgressEntry.user_id)
+                .limit(limit)
+                .all()
+            )
+            return [
+                {"user_id": user_id, "total_amount": int(total or 0)}
+                for user_id, total in rows
+            ]
+
+    def get_sport_challenges_for_daily_summary(
+        self,
+        summary_on: date,
+        scheduled_at: datetime,
+    ) -> list[dict]:
+        """Находит активные цели, которым ещё не отправляли сегодняшнюю сводку."""
+
+        with Session(autoflush=False, bind=engine) as db:
+            challenges = (
+                db.query(SportChallenge)
+                .filter(
+                    SportChallenge.status == "active",
+                    SportChallenge.started_at <= scheduled_at,
+                    (
+                        SportChallenge.last_summary_on.is_(None)
+                        | (SportChallenge.last_summary_on < summary_on)
+                    ),
+                )
+                .order_by(SportChallenge.channel_id, SportChallenge.id)
+                .all()
+            )
+            return [
+                self._serialize_sport_challenge(
+                    challenge,
+                    self._sport_total_query(db, challenge.id).scalar(),
+                )
+                for challenge in challenges
+            ]
+
+    def mark_sport_daily_summary(self, challenge_id: int, summary_on: date) -> None:
+        with Session(autoflush=False, bind=engine) as db:
+            challenge = db.query(SportChallenge).filter_by(id=challenge_id).first()
+            if challenge:
+                challenge.last_summary_on = summary_on
+                db.commit()
 
     def get_unannounced_sport_challenges(self) -> list[dict]:
         with Session(autoflush=False, bind=engine) as db:

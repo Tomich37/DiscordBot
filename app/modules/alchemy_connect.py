@@ -393,6 +393,7 @@ class SportChallenge(Base):
     finished_at = Column(DateTime, nullable=True)
     finish_reason = Column(String(20), nullable=True)
     result_announced = Column(Boolean, default=False, nullable=False, index=True)
+    last_summary_on = Column(Date, nullable=True, index=True)
 
 
 class SportParticipant(Base):
@@ -482,6 +483,16 @@ def ensure_schema_updates():
                 )
 
     if "sport_challenges" in inspector.get_table_names():
+        columns = {
+            column["name"]
+            for column in inspector.get_columns("sport_challenges")
+        }
+        if "last_summary_on" not in columns:
+            with engine.begin() as connection:
+                connection.execute(
+                    text("ALTER TABLE sport_challenges ADD COLUMN last_summary_on DATE")
+                )
+
         # Одно активное название в канале должно однозначно указывать на цель.
         with engine.begin() as connection:
             connection.execute(

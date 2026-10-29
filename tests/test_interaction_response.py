@@ -92,11 +92,11 @@ class InteractionResponseTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(command_name, "sport add")
 
-    async def test_real_sport_payload_is_acknowledged_ephemerally(self) -> None:
+    async def test_real_sport_join_payload_is_acknowledged_ephemerally(self) -> None:
         interaction = FakeInteraction(11)
         interaction.data = FakeCommandData(
             "sport",
-            options=[FakeCommandOption("add", options=[])],
+            options=[FakeCommandOption("join", options=[])],
         )
 
         command_name = get_interaction_command_name(interaction)
@@ -139,12 +139,25 @@ class InteractionResponseTest(unittest.IsolatedAsyncioTestCase):
             ephemeral=True,
         )
 
-        self.assertEqual(interaction.calls, ["edit"])
+        self.assertEqual(interaction.calls, [])
         self.assertEqual(
-            interaction.edited_response,
-            (("Результат добавлен.",), {}),
+            interaction.sent_response,
+            (("Результат добавлен.",), {"ephemeral": True}),
         )
-        self.assertIsNone(interaction.sent_response)
+        self.assertIsNone(interaction.edited_response)
+
+    async def test_sport_add_success_can_be_public(self) -> None:
+        interaction = FakeInteraction(12)
+        interaction.bot = self.bot
+
+        await acknowledge_slash_command(self.bot, interaction, "sport add")
+        await send_interaction_response(interaction, "Публичный результат")
+
+        self.assertFalse(interaction.response.done)
+        self.assertEqual(
+            interaction.sent_response,
+            (("Публичный результат",), {}),
+        )
 
     async def test_sport_status_remains_public(self) -> None:
         interaction = FakeInteraction(9)

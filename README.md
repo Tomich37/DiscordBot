@@ -136,6 +136,8 @@ LOGS_DIR=app/modules/logs
 | `ALCHEMY_START_BALANCE` | нет | `50` | стартовый баланс игрока |
 | `DAILY_REWARD` | нет | `25` | ежедневная награда; поддерживается старое имя `ALCHEMY_DAILY_REWARD` |
 | `ALCHEMY_COMBINE_COST` | нет | `5` | стоимость одного сочетания |
+| `SPORT_TIMEZONE` | нет | `Asia/Tomsk` | часовой пояс ежедневных спортивных сводок |
+| `SPORT_SUMMARY_HOUR` | нет | `21` | час публикации ежедневной сводки от `0` до `23` |
 | `FFMPEG_PATH` | нет | автоопределение | явный путь к исполняемому файлу FFmpeg |
 | `LOGS_DIR` | нет | `app/modules/logs` | каталог ежедневных логов |
 | `DEBUG_LOGS` | нет | `false` | запись debug-сообщений в технический лог |
