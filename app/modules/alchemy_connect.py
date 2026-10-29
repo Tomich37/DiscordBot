@@ -271,6 +271,7 @@ class FortuneCookiePrediction(Base):
     time_horizon = Column(String(80), nullable=False)
     image = Column(String(40), nullable=False)
     arcana = Column(String(80), nullable=True)
+    style_version = Column(Integer, nullable=False, default=1)
     generation_model = Column(String(80), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
@@ -414,6 +415,14 @@ def ensure_schema_updates():
             with engine.begin() as connection:
                 connection.execute(
                     text("ALTER TABLE fortune_cookie_predictions ADD COLUMN arcana VARCHAR(80)")
+                )
+        if "style_version" not in columns:
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "ALTER TABLE fortune_cookie_predictions "
+                        "ADD COLUMN style_version INTEGER NOT NULL DEFAULT 1"
+                    )
                 )
 
 

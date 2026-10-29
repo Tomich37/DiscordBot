@@ -8,6 +8,7 @@ from app.modules.cogs.fortune_cookie_commands import (
     FortuneCookieCommands,
     _build_cookie_embed,
 )
+from app.modules.fortune_cookie_service import COOKIE_STYLE_VERSION
 
 
 class FakeResponse:
@@ -37,6 +38,19 @@ class FakeDatabase:
 
 
 class FortuneCookieCommandTests(unittest.IsolatedAsyncioTestCase):
+    async def test_old_cached_style_is_replaced(self) -> None:
+        cog = object.__new__(FortuneCookieCommands)
+        cog.new_prediction_percent = 0
+
+        self.assertTrue(
+            cog._should_generate_prediction({"arcana": "XIX — Солнце", "style_version": 1})
+        )
+        self.assertFalse(
+            cog._should_generate_prediction(
+                {"arcana": "XIX — Солнце", "style_version": COOKIE_STYLE_VERSION}
+            )
+        )
+
     async def test_embed_shows_arcana(self) -> None:
         embed = _build_cookie_embed(
             {

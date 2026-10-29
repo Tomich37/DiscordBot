@@ -4,7 +4,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from app.modules.fortune_cookie_service import (
+    COOKIE_STYLE_VERSION,
     FortuneCookieGenerator,
+    IMAGES,
     MAJOR_ARCANA,
     MINOR_ARCANA,
     RARITY_WEIGHTS,
@@ -23,6 +25,10 @@ class FortuneCookieServiceTests(unittest.TestCase):
         self.assertEqual(len(MINOR_ARCANA), 56)
         self.assertEqual(len(TAROT_ARCANA), 78)
         self.assertEqual(len(set(TAROT_ARCANA)), 78)
+
+    def test_image_dictionary_has_at_least_one_hundred_unique_values(self):
+        self.assertGreaterEqual(len(IMAGES), 100)
+        self.assertEqual(len(IMAGES), len(set(IMAGES)))
 
     def test_recipe_is_stable_for_same_seed(self):
         first = build_fortune_cookie_recipe(123456, "rare")
@@ -57,6 +63,12 @@ class FortuneCookieServiceTests(unittest.TestCase):
 
     def test_validation_rejects_template_phrase(self):
         text = "Сегодня тебя ждёт удивительная встреча, которая мягко изменит привычный маршрут."
+
+        with self.assertRaisesRegex(ValueError, "шаблонную"):
+            validate_prediction_text(text)
+
+    def test_validation_rejects_generic_fortune_teller_phrase(self):
+        text = "Судьба распорядилась так, что сегодня твой тапок внезапно станет главным советчиком."
 
         with self.assertRaisesRegex(ValueError, "шаблонную"):
             validate_prediction_text(text)
@@ -99,6 +111,7 @@ class FortuneCookieGeneratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["text"], unique)
         self.assertEqual(result["seed"], 321)
         self.assertEqual(result["arcana"], recipe.arcana)
+        self.assertEqual(result["style_version"], COOKIE_STYLE_VERSION)
         self.assertEqual(generator._request_prediction_with_limit.await_count, 2)
 
 

@@ -8,6 +8,7 @@ import disnake
 from disnake.ext import commands
 
 from app.modules.fortune_cookie_service import (
+    COOKIE_STYLE_VERSION,
     FortuneCookieConfigError,
     FortuneCookieGenerationError,
     FortuneCookieGenerator,
@@ -81,6 +82,8 @@ class FortuneCookieCommands(commands.Cog):
         if cached_prediction is None:
             return True
         if not cached_prediction.get("arcana"):
+            return True
+        if cached_prediction.get("style_version") != COOKIE_STYLE_VERSION:
             return True
         return secrets.randbelow(100) < self.new_prediction_percent
 

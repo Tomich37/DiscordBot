@@ -31,6 +31,8 @@ from datetime import date, datetime
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 
+from app.modules.fortune_cookie_service import COOKIE_STYLE_VERSION
+
 
 class Database:
     MUSIC_PENDING_STATUSES = ("pending",)
@@ -53,6 +55,7 @@ class Database:
             "time_horizon": prediction.time_horizon,
             "image": prediction.image,
             "arcana": prediction.arcana,
+            "style_version": prediction.style_version,
             "generation_model": prediction.generation_model,
         }
 
@@ -120,7 +123,11 @@ class Database:
                 )
                 # Сначала используем новые предсказания с Таро, а старые записи
                 # без аркана оставляем безопасным резервом при сбое генератора.
-                .order_by(FortuneCookiePrediction.arcana.is_(None), func.random())
+                .order_by(
+                    FortuneCookiePrediction.style_version != COOKIE_STYLE_VERSION,
+                    FortuneCookiePrediction.arcana.is_(None),
+                    func.random(),
+                )
                 .first()
             )
             return self._serialize_cookie_prediction(prediction) if prediction else None
