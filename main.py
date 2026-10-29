@@ -15,6 +15,7 @@ from app.modules.database import Database
 from app.modules.interaction_response import (
     acknowledge_slash_command,
     clear_deferred_interaction_response,
+    get_interaction_command_name,
     send_interaction_response,
 )
 from app.modules.messages import Messages
@@ -74,17 +75,7 @@ def _format_interaction_options(inter):
 
 
 def _interaction_name(inter):
-    command = getattr(inter, "application_command", None)
-    if command and getattr(command, "name", None):
-        return command.name
-
-    data = getattr(inter, "data", None)
-    if data and getattr(data, "name", None):
-        return data.name
-    if data and getattr(data, "custom_id", None):
-        return data.custom_id
-
-    return "неизвестно"
+    return get_interaction_command_name(inter)
 
 
 async def send_interaction_message(inter, *args, **kwargs):

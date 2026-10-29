@@ -22,6 +22,9 @@ from app.modules.alchemy_connect import (
     RecruitmentQuestion,
     Recruitments,
     Session,
+    SportChallenge,
+    SportParticipant,
+    SportProgressEntry,
     TrackedAnonimusChannel,
     TrackedChannel,
     engine,
@@ -1631,3 +1634,343 @@ class Database:
         with Session(autoflush=False, bind=engine) as db:
             channels = db.query(TrackedAnonimusChannel).filter_by(is_active=True).all()
             return [channel.channel_id for channel in channels]
+
+    @staticmethod
+    def _serialize_sport_challenge(challenge, total_amount: int = 0) -> dict:
+        """Возвращает снимок челленджа, не зависящий от открытой сессии БД."""
+
+        return {
+            "id": challenge.id,
+            "guild_id": challenge.guild_id,
+            "channel_id": challenge.channel_id,
+            "creator_id": challenge.creator_id,
+            "activity_name": challenge.activity_name,
+            "unit_name": challenge.unit_name,
+            "target_amount": challenge.target_amount,
+            "status": challenge.status,
+            "started_at": challenge.started_at,
+            "ends_at": challenge.ends_at,
+            "finished_at": challenge.finished_at,
+            "finish_reason": challenge.finish_reason,
+            "result_announced": challenge.result_announced,
+            "total_amount": int(total_amount or 0),
+        }
+
+    @staticmethod
+    def _sport_total_query(db, challenge_id: int):
+        return db.query(func.coalesce(func.sum(SportProgressEntry.amount), 0)).filter(
+            SportProgressEntry.challenge_id == challenge_id
+        )
+
+    def create_sport_challenge(
+        self,
+        guild_id: int,
+        channel_id: int,
+        creator_id: int,
+        activity_name: str,
+        unit_name: str,
+        target_amount: int,
+        ends_at: datetime,
+    ) -> dict:
+        """Создаёт цель с уникальным активным названием внутри канала."""
+
+        with Session(autoflush=False, bind=engine) as db:
+            existing = (
+                db.query(SportChallenge)
+                .filter(
+                    SportChallenge.guild_id == guild_id,
+                    SportChallenge.channel_id == channel_id,
+                    SportChallenge.status == "active",
+                    func.lower(SportChallenge.activity_name) == activity_name.lower(),
+                )
+                .with_for_update()
+                .first()
+            )
+            if existing:
+                if existing.ends_at > datetime.utcnow():
+                    total = self._sport_total_query(db, existing.id).scalar()
+                    return {
+                        "status": "already_active",
+                        "challenge": self._serialize_sport_challenge(existing, total),
+                    }
+
+                existing.status = "expired"
+                existing.finish_reason = "time_expired"
+                existing.finished_at = datetime.utcnow()
+                db.flush()
+
+            challenge = SportChallenge(
+                guild_id=guild_id,
+                channel_id=channel_id,
+                creator_id=creator_id,
+                activity_name=activity_name,
+                unit_name=unit_name,
+                target_amount=target_amount,
+                ends_at=ends_at,
+            )
+            db.add(challenge)
+            try:
+                db.commit()
+            except IntegrityError:
+                # Параллельные команды создания могут одновременно не увидеть запись.
+                db.rollback()
+                existing = (
+                    db.query(SportChallenge)
+                    .filter(
+                        SportChallenge.guild_id == guild_id,
+                        SportChallenge.channel_id == channel_id,
+                        SportChallenge.status == "active",
+                        func.lower(SportChallenge.activity_name) == activity_name.lower(),
+                    )
+                    .first()
+                )
+                if existing:
+                    total = self._sport_total_query(db, existing.id).scalar()
+                    return {
+                        "status": "already_active",
+                        "challenge": self._serialize_sport_challenge(existing, total),
+                    }
+                raise
+            db.refresh(challenge)
+            return {"status": "created", "challenge": self._serialize_sport_challenge(challenge)}
+
+    def get_sport_challenge_by_name(
+        self,
+        guild_id: int,
+        channel_id: int,
+        activity_name: str,
+        active_only: bool = True,
+    ) -> dict | None:
+        """Находит по названию активный либо последний одноимённый челлендж."""
+
+        with Session(autoflush=False, bind=engine) as db:
+            query = db.query(SportChallenge).filter(
+                SportChallenge.guild_id == guild_id,
+                SportChallenge.channel_id == channel_id,
+                func.lower(SportChallenge.activity_name) == activity_name.strip().lower(),
+            )
+            if active_only:
+                query = query.filter(SportChallenge.status == "active")
+
+            challenge = (
+                query
+                .order_by(SportChallenge.id.desc())
+                .first()
+            )
+            if not challenge:
+                return None
+
+            total = self._sport_total_query(db, challenge.id).scalar()
+            return self._serialize_sport_challenge(challenge, total)
+
+    def get_sport_challenge_names(
+        self,
+        guild_id: int,
+        channel_id: int,
+        search: str = "",
+        active_only: bool = True,
+        limit: int = 25,
+    ) -> list[str]:
+        """Возвращает названия для автодополнения Discord без дублей."""
+
+        with Session(autoflush=False, bind=engine) as db:
+            query = db.query(SportChallenge.activity_name).filter(
+                SportChallenge.guild_id == guild_id,
+                SportChallenge.channel_id == channel_id,
+            )
+            if active_only:
+                query = query.filter(
+                    SportChallenge.status == "active",
+                    SportChallenge.ends_at > datetime.utcnow(),
+                )
+            if search.strip():
+                query = query.filter(
+                    SportChallenge.activity_name.ilike(f"%{search.strip()}%")
+                )
+
+            rows = query.order_by(SportChallenge.id.desc()).limit(limit * 3).all()
+            names = []
+            seen = set()
+            for (name,) in rows:
+                normalized = name.casefold()
+                if normalized in seen:
+                    continue
+                seen.add(normalized)
+                names.append(name)
+                if len(names) == limit:
+                    break
+            return names
+
+    def join_sport_challenge(self, challenge_id: int, user_id: int) -> str:
+        with Session(autoflush=False, bind=engine) as db:
+            challenge = (
+                db.query(SportChallenge)
+                .filter_by(id=challenge_id)
+                .with_for_update()
+                .first()
+            )
+            if not challenge or challenge.status != "active":
+                return "inactive"
+            if challenge.ends_at <= datetime.utcnow():
+                challenge.status = "expired"
+                challenge.finish_reason = "time_expired"
+                challenge.finished_at = datetime.utcnow()
+                db.commit()
+                return "expired"
+
+            participant = (
+                db.query(SportParticipant)
+                .filter_by(challenge_id=challenge_id, user_id=user_id)
+                .first()
+            )
+            if participant:
+                return "already_joined"
+
+            db.add(SportParticipant(challenge_id=challenge_id, user_id=user_id))
+            db.commit()
+            return "joined"
+
+    def add_sport_progress(self, challenge_id: int, user_id: int, amount: int) -> dict:
+        """Атомарно добавляет результат и закрывает достигнутую общую цель."""
+
+        with Session(autoflush=False, bind=engine) as db:
+            challenge = (
+                db.query(SportChallenge)
+                .filter_by(id=challenge_id)
+                .with_for_update()
+                .first()
+            )
+            if not challenge or challenge.status != "active":
+                return {"status": "inactive"}
+            if challenge.ends_at <= datetime.utcnow():
+                challenge.status = "expired"
+                challenge.finish_reason = "time_expired"
+                challenge.finished_at = datetime.utcnow()
+                total = int(self._sport_total_query(db, challenge_id).scalar() or 0)
+                db.commit()
+                return {
+                    "status": "expired",
+                    "challenge": self._serialize_sport_challenge(challenge, total),
+                    "total_amount": total,
+                }
+
+            participant = (
+                db.query(SportParticipant)
+                .filter_by(challenge_id=challenge_id, user_id=user_id)
+                .first()
+            )
+            if not participant:
+                return {"status": "not_joined"}
+
+            db.add(
+                SportProgressEntry(
+                    challenge_id=challenge_id,
+                    user_id=user_id,
+                    amount=amount,
+                )
+            )
+            db.flush()
+            total = int(self._sport_total_query(db, challenge_id).scalar() or 0)
+            completed = total >= challenge.target_amount
+            if completed:
+                challenge.status = "completed"
+                challenge.finish_reason = "target_reached"
+                challenge.finished_at = datetime.utcnow()
+
+            db.commit()
+            return {
+                "status": "completed" if completed else "added",
+                "total_amount": total,
+                "challenge": self._serialize_sport_challenge(challenge, total),
+            }
+
+    def finish_sport_challenge(self, challenge_id: int, reason: str = "manual") -> dict | None:
+        with Session(autoflush=False, bind=engine) as db:
+            challenge = (
+                db.query(SportChallenge)
+                .filter_by(id=challenge_id)
+                .with_for_update()
+                .first()
+            )
+            if not challenge:
+                return None
+
+            total = int(self._sport_total_query(db, challenge_id).scalar() or 0)
+            if challenge.status == "active":
+                challenge.status = "expired" if reason == "time_expired" else "finished"
+                challenge.finish_reason = reason
+                challenge.finished_at = datetime.utcnow()
+                db.commit()
+                db.refresh(challenge)
+
+            return self._serialize_sport_challenge(challenge, total)
+
+    def finish_expired_sport_challenges(self, now: datetime) -> list[int]:
+        """Закрывает просроченные цели и возвращает их идентификаторы."""
+
+        with Session(autoflush=False, bind=engine) as db:
+            challenges = (
+                db.query(SportChallenge)
+                .filter(
+                    SportChallenge.status == "active",
+                    SportChallenge.ends_at <= now,
+                )
+                .with_for_update()
+                .all()
+            )
+            for challenge in challenges:
+                challenge.status = "expired"
+                challenge.finish_reason = "time_expired"
+                challenge.finished_at = now
+
+            challenge_ids = [challenge.id for challenge in challenges]
+            db.commit()
+            return challenge_ids
+
+    def get_sport_leaderboard(self, challenge_id: int, limit: int = 20) -> list[dict]:
+        """Возвращает записавшихся участников, включая ещё не отметившихся."""
+
+        with Session(autoflush=False, bind=engine) as db:
+            rows = (
+                db.query(
+                    SportParticipant.user_id,
+                    func.coalesce(func.sum(SportProgressEntry.amount), 0).label("total"),
+                )
+                .outerjoin(
+                    SportProgressEntry,
+                    (SportProgressEntry.challenge_id == SportParticipant.challenge_id)
+                    & (SportProgressEntry.user_id == SportParticipant.user_id),
+                )
+                .filter(SportParticipant.challenge_id == challenge_id)
+                .group_by(SportParticipant.user_id)
+                .order_by(func.sum(SportProgressEntry.amount).desc().nullslast(), SportParticipant.user_id)
+                .limit(limit)
+                .all()
+            )
+            return [{"user_id": user_id, "total_amount": int(total or 0)} for user_id, total in rows]
+
+    def get_unannounced_sport_challenges(self) -> list[dict]:
+        with Session(autoflush=False, bind=engine) as db:
+            challenges = (
+                db.query(SportChallenge)
+                .filter(
+                    SportChallenge.status != "active",
+                    SportChallenge.result_announced.is_(False),
+                )
+                .order_by(SportChallenge.finished_at.asc())
+                .all()
+            )
+            return [
+                self._serialize_sport_challenge(
+                    challenge,
+                    self._sport_total_query(db, challenge.id).scalar(),
+                )
+                for challenge in challenges
+            ]
+
+    def mark_sport_result_announced(self, challenge_id: int) -> None:
+        with Session(autoflush=False, bind=engine) as db:
+            challenge = db.query(SportChallenge).filter_by(id=challenge_id).first()
+            if challenge:
+                challenge.result_announced = True
+                db.commit()
