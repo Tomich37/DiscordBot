@@ -18,10 +18,10 @@ from app.modules.fortune_cookie_service import (
 
 
 RARITY_PRESENTATION = {
-    "common": ("Обычное", 0x95A5A6),
-    "uncommon": ("Необычное", 0x2ECC71),
-    "rare": ("Редкое", 0x3498DB),
-    "legendary": ("Легендарное", 0xF1C40F),
+    "common": ("Тихий знак", 0x95A5A6),
+    "uncommon": ("Любопытный знак", 0x2ECC71),
+    "rare": ("Яркий знак", 0x3498DB),
+    "legendary": ("Редкий знак", 0xF1C40F),
 }
 
 
@@ -42,16 +42,30 @@ def _build_cookie_embed(
         prediction["rarity"],
         ("Неизвестное", 0x95A5A6),
     )
-    title = "🥠 Ваше печенье на сегодня" if repeated else "🥠 Печенье открыто"
+    prediction_title = prediction.get("title") or "Ваше предсказание"
+    title_prefix = "Ваше печенье" if repeated else "Печенье открыто"
     embed = disnake.Embed(
-        title=title,
-        description=f"*{prediction['text']}*",
+        title=f"🥠 {title_prefix}: {prediction_title}",
+        description=f"> {prediction['text']}",
         color=color,
     )
-    embed.add_field(name="Редкость", value=rarity_name, inline=True)
-    embed.add_field(name="Образ", value=prediction["image"].capitalize(), inline=True)
-    if prediction.get("arcana"):
-        embed.add_field(name="Аркан", value=prediction["arcana"], inline=False)
+    embed.add_field(name="Сила знака", value=rarity_name, inline=True)
+    embed.add_field(
+        name="Тема",
+        value=prediction.get("theme") or "Повседневность",
+        inline=True,
+    )
+    embed.add_field(
+        name="Срок",
+        value=prediction.get("time_horizon") or "В ближайшее время",
+        inline=True,
+    )
+    if prediction.get("advice"):
+        embed.add_field(
+            name="Что поможет",
+            value=prediction["advice"],
+            inline=False,
+        )
     if next_available_at:
         relative_time = disnake.utils.format_dt(next_available_at, style="R")
         exact_time = disnake.utils.format_dt(next_available_at, style="F")
@@ -60,7 +74,8 @@ def _build_cookie_embed(
             value=f"Новая попытка {relative_time}\nСброс: {exact_time}",
             inline=False,
         )
-    embed.set_footer(text=f"Номер предсказания: {prediction['seed']}")
+    short_code = f"{prediction['seed'] & 0xFFFFFF:06X}"
+    embed.set_footer(text=f"Код печенья: {short_code}")
     return embed
 
 
@@ -102,7 +117,7 @@ class FortuneCookieCommands(commands.Cog):
     def _should_generate_prediction(self, cached_prediction: dict | None) -> bool:
         if cached_prediction is None:
             return True
-        if not cached_prediction.get("arcana"):
+        if not cached_prediction.get("title") or not cached_prediction.get("advice"):
             return True
         if cached_prediction.get("style_version") != COOKIE_STYLE_VERSION:
             return True

@@ -44,29 +44,46 @@ class FortuneCookieCommandTests(unittest.IsolatedAsyncioTestCase):
         cog.new_prediction_percent = 0
 
         self.assertTrue(
-            cog._should_generate_prediction({"arcana": "XIX — Солнце", "style_version": 1})
+            cog._should_generate_prediction(
+                {"title": "Ясный ответ", "advice": "Спроси прямо.", "style_version": 1}
+            )
         )
         self.assertFalse(
             cog._should_generate_prediction(
-                {"arcana": "XIX — Солнце", "style_version": COOKIE_STYLE_VERSION}
+                {
+                    "title": "Ясный ответ",
+                    "advice": "Спроси прямо.",
+                    "style_version": COOKIE_STYLE_VERSION,
+                }
             )
         )
 
-    async def test_embed_shows_arcana(self) -> None:
+    async def test_embed_shows_new_prediction_structure(self) -> None:
         next_available_at = datetime(2026, 10, 30, 0, 0, tzinfo=ZoneInfo("Asia/Tomsk"))
         embed = _build_cookie_embed(
             {
                 "seed": 101,
-                "text": "Знакомая дорога сегодня поможет заметить новую возможность.",
+                "title": "Разговор без репетиции",
+                "text": "Знакомый разговор до конца дня поможет тебе спокойно прояснить старый вопрос.",
                 "rarity": "common",
-                "image": "фонарь",
-                "arcana": "XIX — Солнце",
+                "theme": "Общение",
+                "time_horizon": "до конца дня",
+                "advice": "Задай один прямой вопрос без длинного вступления.",
             },
             next_available_at=next_available_at,
         )
 
         fields = {field.name: field.value for field in embed.fields}
-        self.assertEqual(fields["Аркан"], "XIX — Солнце")
+        self.assertEqual(embed.title, "🥠 Печенье открыто: Разговор без репетиции")
+        self.assertEqual(fields["Сила знака"], "Тихий знак")
+        self.assertEqual(fields["Тема"], "Общение")
+        self.assertEqual(fields["Срок"], "до конца дня")
+        self.assertEqual(
+            fields["Что поможет"],
+            "Задай один прямой вопрос без длинного вступления.",
+        )
+        self.assertNotIn("Аркан", fields)
+        self.assertNotIn("Образ", fields)
         timestamp = int(next_available_at.timestamp())
         self.assertEqual(
             fields["Следующее печенье"],

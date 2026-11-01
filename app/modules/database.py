@@ -58,6 +58,8 @@ class Database:
             "time_horizon": prediction.time_horizon,
             "image": prediction.image,
             "arcana": prediction.arcana,
+            "title": prediction.title,
+            "advice": prediction.advice,
             "style_version": prediction.style_version,
             "generation_model": prediction.generation_model,
         }
@@ -119,18 +121,16 @@ class Database:
                 db.query(FortuneCookiePrediction)
                 .filter(
                     FortuneCookiePrediction.rarity == rarity,
+                    FortuneCookiePrediction.style_version == COOKIE_STYLE_VERSION,
+                    FortuneCookiePrediction.title.is_not(None),
+                    FortuneCookiePrediction.advice.is_not(None),
                     ~FortuneCookiePrediction.id.in_(seen_prediction_ids),
                     ~FortuneCookiePrediction.id.in_(archived_prediction_ids),
                     ~FortuneCookiePrediction.id.in_(issued_today_ids),
                     ~FortuneCookiePrediction.id.in_(archived_today_ids),
                 )
-                # Сначала используем новые предсказания с Таро, а старые записи
-                # без аркана оставляем безопасным резервом при сбое генератора.
-                .order_by(
-                    FortuneCookiePrediction.style_version != COOKIE_STYLE_VERSION,
-                    FortuneCookiePrediction.arcana.is_(None),
-                    func.random(),
-                )
+                # Старые случайные комбинации намеренно не попадают в новую выдачу.
+                .order_by(func.random())
                 .first()
             )
             return self._serialize_cookie_prediction(prediction) if prediction else None
