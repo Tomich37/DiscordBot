@@ -2,7 +2,7 @@ import asyncio
 import unittest
 from datetime import date, datetime
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 from zoneinfo import ZoneInfo
 
 from app.modules.cogs.fortune_cookie_commands import (
@@ -39,6 +39,27 @@ class FakeDatabase:
 
 
 class FortuneCookieCommandTests(unittest.IsolatedAsyncioTestCase):
+    async def test_generation_passes_used_themes_to_generator(self) -> None:
+        cog = object.__new__(FortuneCookieCommands)
+        cog._theme_generation_lock = asyncio.Lock()
+        cog.db = SimpleNamespace(
+            get_recent_fortune_cookie_texts=AsyncMock(return_value=("Старый текст",)),
+            get_fortune_cookie_themes=AsyncMock(return_value=("Эфирогенез",)),
+            create_fortune_cookie_prediction=AsyncMock(
+                side_effect=lambda prediction: prediction
+            ),
+        )
+        cog.generator = SimpleNamespace(
+            generate_prediction=AsyncMock(return_value={"theme": "Маяк"})
+        )
+
+        result = await cog._generate_prediction("common")
+
+        self.assertEqual(result["theme"], "Маяк")
+        args = cog.generator.generate_prediction.await_args.args
+        self.assertEqual(args[1], ("Старый текст",))
+        self.assertEqual(args[2], ("Эфирогенез",))
+
     async def test_old_cached_style_is_replaced(self) -> None:
         cog = object.__new__(FortuneCookieCommands)
         cog.new_prediction_percent = 0

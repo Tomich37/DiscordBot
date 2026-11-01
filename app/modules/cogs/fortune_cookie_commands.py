@@ -82,6 +82,8 @@ class FortuneCookieCommands(commands.Cog):
         self.generator = FortuneCookieGenerator()
         self.new_prediction_percent = _read_generation_percent()
         self._user_locks: dict[tuple[int, int], asyncio.Lock] = {}
+        # Одна блокировка не даёт параллельным генерациям выбрать одинаковую тему.
+        self._theme_generation_lock = asyncio.Lock()
         self._generation_locks = {
             rarity: asyncio.Lock()
             for rarity in RARITY_PRESENTATION
@@ -119,11 +121,17 @@ class FortuneCookieCommands(commands.Cog):
         return secrets.randbelow(100) < self.new_prediction_percent
 
     async def _generate_prediction(self, rarity: str) -> dict:
-        seed = secrets.randbelow(9_000_000_000_000_000_000) + 1
-        recipe = build_fortune_cookie_recipe(seed, rarity)
-        existing_texts = await self.db.get_recent_fortune_cookie_texts(limit=1000)
-        generated = await self.generator.generate_prediction(recipe, existing_texts)
-        return await self.db.create_fortune_cookie_prediction(generated)
+        async with self._theme_generation_lock:
+            seed = secrets.randbelow(9_000_000_000_000_000_000) + 1
+            recipe = build_fortune_cookie_recipe(seed, rarity)
+            existing_texts = await self.db.get_recent_fortune_cookie_texts(limit=1000)
+            existing_themes = await self.db.get_fortune_cookie_themes()
+            generated = await self.generator.generate_prediction(
+                recipe,
+                existing_texts,
+                existing_themes,
+            )
+            return await self.db.create_fortune_cookie_prediction(generated)
 
     @commands.slash_command(
         name="cookie",

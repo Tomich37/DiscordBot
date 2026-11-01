@@ -26,8 +26,8 @@ RARITY_WEIGHTS = {
     "legendary": 2,
 }
 
-# Версия 7 переключает выдачу на свободные шуточные предсказания без тематических фильтров.
-COOKIE_STYLE_VERSION = 7
+# Версия 8 гарантирует отдельную тему для каждого нового печенья.
+COOKIE_STYLE_VERSION = 8
 
 RARITY_DIRECTIONS = {
     "common": (
@@ -206,8 +206,14 @@ class FortuneCookieGenerator:
         if not self.client:
             raise FortuneCookieConfigError("GigaChat-клиент не инициализирован.")
 
-    def _build_theme_prompt(self, seed: int):
+    def _build_theme_prompt(
+        self,
+        seed: int,
+        forbidden_themes: tuple[str, ...] = (),
+    ):
         """Первый независимый заход: нейросеть свободно выбирает одно слово."""
+
+        forbidden_block = ", ".join(forbidden_themes[-250:]) or "Нет."
 
         system_prompt = (
             "Выбери одно случайное существующее русское слово любой части речи, на тему которого "
@@ -217,7 +223,8 @@ class FortuneCookieGenerator:
         )
         user_prompt = (
             f"Случайный идентификатор: {seed}. Выбери любое новое выразительное слово. "
-            "Не пытайся превращать цифры в смысл."
+            "Не пытайся превращать цифры в смысл. Слово не должно совпадать ни с одной "
+            f"уже использованной темой из списка: {forbidden_block}"
         )
         return self.chat_payload_class(
             model=self.model,
@@ -302,12 +309,20 @@ class FortuneCookieGenerator:
             },
         )
 
-    def _request_theme(self, seed: int):
-        return self.client.chat(self._build_theme_prompt(seed))
+    def _request_theme(self, seed: int, forbidden_themes: tuple[str, ...]):
+        return self.client.chat(self._build_theme_prompt(seed, forbidden_themes))
 
-    async def _request_theme_with_limit(self, seed: int):
+    async def _request_theme_with_limit(
+        self,
+        seed: int,
+        forbidden_themes: tuple[str, ...],
+    ):
         async with _GIGACHAT_REQUEST_SEMAPHORE:
-            return await asyncio.to_thread(self._request_theme, seed)
+            return await asyncio.to_thread(
+                self._request_theme,
+                seed,
+                forbidden_themes,
+            )
 
     def _request_prediction(
         self,
@@ -336,21 +351,42 @@ class FortuneCookieGenerator:
                 rejection_notes,
             )
 
-    async def _generate_theme(self, seed: int) -> str:
-        """Получает слово первым запросом и отдельно проверяет его формат."""
+    async def _generate_theme(
+        self,
+        seed: int,
+        existing_themes: tuple[str, ...] = (),
+    ) -> str:
+        """Получает новое слово и не допускает повтор уже использованной темы."""
 
         last_error = None
+        rejected_themes: tuple[str, ...] = ()
+        normalized_existing = {
+            normalize_prediction_text(theme)
+            for theme in existing_themes
+            if normalize_prediction_text(theme)
+        }
         for _ in range(min(3, self.attempts)):
             try:
-                response = await self._request_theme_with_limit(seed)
+                forbidden_themes = tuple(
+                    dict.fromkeys((*existing_themes, *rejected_themes))
+                )
+                response = await self._request_theme_with_limit(
+                    seed,
+                    forbidden_themes,
+                )
                 output_text = _extract_response_text(response)
                 if not output_text:
                     details = _describe_empty_response(response)
                     raise ValueError(f"GigaChat вернул пустую тему: {details}")
                 payload = _extract_json_payload(output_text)
-                return validate_theme_word(
+                theme = validate_theme_word(
                     payload.get("слово", payload.get("theme", ""))
                 )
+                if normalize_prediction_text(theme) in normalized_existing:
+                    rejected_themes += (theme,)
+                    normalized_existing.add(normalize_prediction_text(theme))
+                    raise ValueError(f"Тема «{theme}» уже использовалась.")
+                return theme
             except Exception as error:
                 last_error = error
 
@@ -362,11 +398,12 @@ class FortuneCookieGenerator:
         self,
         recipe: FortuneCookieRecipe,
         existing_texts: tuple[str, ...] = (),
+        existing_themes: tuple[str, ...] = (),
     ) -> dict:
         self.ensure_ready()
 
         # Первый заход не знает будущего сюжета и выбирает только свободное слово.
-        theme = await self._generate_theme(recipe.seed)
+        theme = await self._generate_theme(recipe.seed, existing_themes)
         rejected_texts: tuple[str, ...] = ()
         rejection_notes: tuple[str, ...] = ()
         last_error = None

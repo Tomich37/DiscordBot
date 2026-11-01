@@ -96,7 +96,7 @@ class Database:
         rarity: str,
         opened_on: date,
     ) -> dict | None:
-        """Выбирает вариант, который участник не видел и никто не получал сегодня."""
+        """Выбирает ещё никому не выданный вариант нужной редкости."""
 
         with Session(autoflush=False, bind=engine) as db:
             seen_prediction_ids = db.query(FortuneCookieOpening.prediction_id).filter(
@@ -117,6 +117,10 @@ class Database:
             ).filter(
                 FortuneCookieOpeningHistory.opened_on == opened_on,
             )
+            issued_prediction_ids = db.query(FortuneCookieOpening.prediction_id)
+            archived_prediction_ids_global = db.query(
+                FortuneCookieOpeningHistory.prediction_id
+            )
             prediction = (
                 db.query(FortuneCookiePrediction)
                 .filter(
@@ -128,8 +132,10 @@ class Database:
                     ~FortuneCookiePrediction.id.in_(archived_prediction_ids),
                     ~FortuneCookiePrediction.id.in_(issued_today_ids),
                     ~FortuneCookiePrediction.id.in_(archived_today_ids),
+                    ~FortuneCookiePrediction.id.in_(issued_prediction_ids),
+                    ~FortuneCookiePrediction.id.in_(archived_prediction_ids_global),
                 )
-                # Старые случайные комбинации намеренно не попадают в новую выдачу.
+                # Одно печенье выдаётся только одному человеку, чтобы тема не повторялась.
                 .order_by(func.random())
                 .first()
             )
@@ -146,6 +152,17 @@ class Database:
                 .all()
             )
             return tuple(text for (text,) in rows)
+
+    def get_fortune_cookie_themes(self) -> tuple[str, ...]:
+        """Возвращает все темы, чтобы новое печенье получило уникальное слово."""
+
+        with Session(autoflush=False, bind=engine) as db:
+            rows = (
+                db.query(FortuneCookiePrediction.theme)
+                .distinct()
+                .all()
+            )
+            return tuple(theme for (theme,) in rows if theme)
 
     def create_fortune_cookie_prediction(self, prediction_data: dict) -> dict:
         """Сохраняет новый вариант либо возвращает запись, созданную параллельно."""

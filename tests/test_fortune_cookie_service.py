@@ -50,11 +50,13 @@ class FortuneCookieServiceTests(unittest.TestCase):
     def test_first_prompt_only_requests_a_free_word(self):
         generator = self._prompt_generator()
 
-        payload = generator._build_theme_prompt(777)
+        payload = generator._build_theme_prompt(777, ("эфирогенез", "маяк"))
         prompt = " ".join(message.content for message in payload.messages)
 
         self.assertIn("одно случайное существующее русское", prompt)
         self.assertIn("любое новое выразительное слово", prompt)
+        self.assertIn("эфирогенез", prompt)
+        self.assertIn("маяк", prompt)
         self.assertIn('"слово"', json.dumps(payload.response_format, ensure_ascii=False))
         self.assertNotIn("предсказание должно содержать", prompt.lower())
 
@@ -147,8 +149,8 @@ class FortuneCookieGeneratorTests(unittest.IsolatedAsyncioTestCase):
         generator.client = object()
         call_order = []
 
-        async def request_theme(seed):
-            call_order.append(("theme", seed))
+        async def request_theme(seed, forbidden_themes):
+            call_order.append(("theme", seed, forbidden_themes))
             return self._response({"theme": "маяк"})
 
         async def request_prediction(*args):
@@ -167,15 +169,36 @@ class FortuneCookieGeneratorTests(unittest.IsolatedAsyncioTestCase):
         )
         recipe = build_fortune_cookie_recipe(321, "uncommon")
 
-        result = await generator.generate_prediction(recipe)
+        result = await generator.generate_prediction(recipe, existing_themes=("эхо",))
 
-        self.assertEqual(call_order, [("theme", 321), ("prediction", "маяк")])
+        self.assertEqual(
+            call_order,
+            [("theme", 321, ("эхо",)), ("prediction", "маяк")],
+        )
         self.assertEqual(result["theme"], "Маяк")
         self.assertEqual(result["title"], "Свет на другом маршруте")
         self.assertEqual(result["text"], prediction)
         self.assertEqual(result["time_horizon"], "")
         self.assertEqual(result["style_version"], COOKIE_STYLE_VERSION)
         self.assertIsNone(result["arcana"])
+
+    async def test_generator_retries_when_theme_was_already_used(self):
+        generator = FortuneCookieGenerator.__new__(FortuneCookieGenerator)
+        generator.attempts = 3
+        generator._request_theme_with_limit = AsyncMock(
+            side_effect=[
+                self._response({"theme": "эфирогенез"}),
+                self._response({"theme": "маяк"}),
+            ]
+        )
+
+        theme = await generator._generate_theme(321, ("Эфирогенез",))
+
+        self.assertEqual(theme, "маяк")
+        self.assertEqual(generator._request_theme_with_limit.await_count, 2)
+        second_forbidden = generator._request_theme_with_limit.await_args_list[1].args[1]
+        self.assertIn("Эфирогенез", second_forbidden)
+        self.assertIn("эфирогенез", second_forbidden)
 
     async def test_generator_retries_only_second_stage_after_exact_duplicate(self):
         existing = (
