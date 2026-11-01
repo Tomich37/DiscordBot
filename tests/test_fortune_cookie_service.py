@@ -2,15 +2,17 @@ import json
 import random
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from app.modules.fortune_cookie_service import (
     COOKIE_STYLE_VERSION,
     RARITY_DIRECTIONS,
     RARITY_WEIGHTS,
+    THEME_WORDS,
     FortuneCookieGenerator,
     build_fortune_cookie_recipe,
     choose_rarity,
+    choose_theme_word,
     normalize_prediction_text,
     validate_prediction_bundle,
     validate_prediction_text,
@@ -47,18 +49,18 @@ class FortuneCookieServiceTests(unittest.TestCase):
             validate_theme_word("старый маяк")
         self.assertEqual(validate_theme_word("катастрофа"), "катастрофа")
 
-    def test_first_prompt_only_requests_a_free_word(self):
-        generator = self._prompt_generator()
+    def test_theme_dictionary_contains_ten_thousand_unique_words(self):
+        self.assertEqual(len(THEME_WORDS), 10_000)
+        self.assertEqual(len(set(THEME_WORDS)), 10_000)
+        self.assertTrue(all(validate_theme_word(word) == word for word in THEME_WORDS))
+        self.assertFalse(any("эфир" in word for word in THEME_WORDS))
 
-        payload = generator._build_theme_prompt(777, ("эфирогенез", "маяк"))
-        prompt = " ".join(message.content for message in payload.messages)
+    def test_theme_choice_excludes_words_already_used(self):
+        only_available = THEME_WORDS[-1]
 
-        self.assertIn("одно случайное существующее русское", prompt)
-        self.assertIn("любое новое выразительное слово", prompt)
-        self.assertIn("эфирогенез", prompt)
-        self.assertIn("маяк", prompt)
-        self.assertIn('"слово"', json.dumps(payload.response_format, ensure_ascii=False))
-        self.assertNotIn("предсказание должно содержать", prompt.lower())
+        selected = choose_theme_word(THEME_WORDS[:-1], random.Random(42))
+
+        self.assertEqual(selected, only_available)
 
     def test_second_prompt_gives_model_freedom_to_interpret_theme(self):
         generator = self._prompt_generator()
@@ -137,7 +139,7 @@ class FortuneCookieGeneratorTests(unittest.IsolatedAsyncioTestCase):
         choice = SimpleNamespace(message=message, finish_reason="stop")
         return SimpleNamespace(choices=[choice], id="test-response", model="test-model")
 
-    async def test_generator_makes_theme_request_before_prediction_request(self):
+    async def test_generator_uses_local_theme_before_prediction_request(self):
         prediction = (
             "Незнакомый маршрут к вечеру окажется короче привычного, когда яркая "
             "вывеска поможет заметить тихий двор и удобный проход через него."
@@ -149,10 +151,6 @@ class FortuneCookieGeneratorTests(unittest.IsolatedAsyncioTestCase):
         generator.client = object()
         call_order = []
 
-        async def request_theme(seed, forbidden_themes):
-            call_order.append(("theme", seed, forbidden_themes))
-            return self._response({"theme": "маяк"})
-
         async def request_prediction(*args):
             call_order.append(("prediction", args[1]))
             return self._response(
@@ -163,42 +161,28 @@ class FortuneCookieGeneratorTests(unittest.IsolatedAsyncioTestCase):
                 }
             )
 
-        generator._request_theme_with_limit = AsyncMock(side_effect=request_theme)
         generator._request_prediction_with_limit = AsyncMock(
             side_effect=request_prediction
         )
         recipe = build_fortune_cookie_recipe(321, "uncommon")
 
-        result = await generator.generate_prediction(recipe, existing_themes=("эхо",))
+        with patch(
+            "app.modules.fortune_cookie_service.choose_theme_word",
+            return_value="маяк",
+        ) as theme_choice:
+            result = await generator.generate_prediction(
+                recipe,
+                existing_themes=("эхо",),
+            )
 
-        self.assertEqual(
-            call_order,
-            [("theme", 321, ("эхо",)), ("prediction", "маяк")],
-        )
+        self.assertEqual(call_order, [("prediction", "маяк")])
+        theme_choice.assert_called_once_with(("эхо",))
         self.assertEqual(result["theme"], "Маяк")
         self.assertEqual(result["title"], "Свет на другом маршруте")
         self.assertEqual(result["text"], prediction)
         self.assertEqual(result["time_horizon"], "")
         self.assertEqual(result["style_version"], COOKIE_STYLE_VERSION)
         self.assertIsNone(result["arcana"])
-
-    async def test_generator_retries_when_theme_was_already_used(self):
-        generator = FortuneCookieGenerator.__new__(FortuneCookieGenerator)
-        generator.attempts = 3
-        generator._request_theme_with_limit = AsyncMock(
-            side_effect=[
-                self._response({"theme": "эфирогенез"}),
-                self._response({"theme": "маяк"}),
-            ]
-        )
-
-        theme = await generator._generate_theme(321, ("Эфирогенез",))
-
-        self.assertEqual(theme, "маяк")
-        self.assertEqual(generator._request_theme_with_limit.await_count, 2)
-        second_forbidden = generator._request_theme_with_limit.await_args_list[1].args[1]
-        self.assertIn("Эфирогенез", second_forbidden)
-        self.assertIn("эфирогенез", second_forbidden)
 
     async def test_generator_retries_only_second_stage_after_exact_duplicate(self):
         existing = (
@@ -214,9 +198,6 @@ class FortuneCookieGeneratorTests(unittest.IsolatedAsyncioTestCase):
         generator.attempts = 2
         generator.config_error = None
         generator.client = object()
-        generator._request_theme_with_limit = AsyncMock(
-            return_value=self._response({"theme": "черновик"})
-        )
         generator._request_prediction_with_limit = AsyncMock(
             side_effect=[
                 self._response(
@@ -236,13 +217,16 @@ class FortuneCookieGeneratorTests(unittest.IsolatedAsyncioTestCase):
             ]
         )
 
-        result = await generator.generate_prediction(
-            build_fortune_cookie_recipe(321, "uncommon"),
-            (existing,),
-        )
+        with patch(
+            "app.modules.fortune_cookie_service.choose_theme_word",
+            return_value="черновик",
+        ):
+            result = await generator.generate_prediction(
+                build_fortune_cookie_recipe(321, "uncommon"),
+                (existing,),
+            )
 
         self.assertEqual(result["text"], unique)
-        self.assertEqual(generator._request_theme_with_limit.await_count, 1)
         self.assertEqual(generator._request_prediction_with_limit.await_count, 2)
         rejection_notes = generator._request_prediction_with_limit.await_args_list[1].args[3]
         self.assertTrue(rejection_notes)
