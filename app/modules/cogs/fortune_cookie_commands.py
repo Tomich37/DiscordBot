@@ -46,18 +46,13 @@ def _build_cookie_embed(
     title_prefix = "Ваше печенье" if repeated else "Печенье открыто"
     embed = disnake.Embed(
         title=f"🥠 {title_prefix}: {prediction_title}",
-        description=f"> {prediction['text']}",
+        description=prediction["text"],
         color=color,
     )
     embed.add_field(name="Сила знака", value=rarity_name, inline=True)
     embed.add_field(
         name="Тема",
         value=prediction.get("theme") or "Повседневность",
-        inline=True,
-    )
-    embed.add_field(
-        name="Срок",
-        value=prediction.get("time_horizon") or "В ближайшее время",
         inline=True,
     )
     if prediction.get("advice"):

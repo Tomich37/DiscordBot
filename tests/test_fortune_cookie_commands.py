@@ -67,7 +67,6 @@ class FortuneCookieCommandTests(unittest.IsolatedAsyncioTestCase):
                 "text": "Знакомый разговор до конца дня поможет тебе спокойно прояснить старый вопрос.",
                 "rarity": "common",
                 "theme": "Общение",
-                "time_horizon": "до конца дня",
                 "advice": "Задай один прямой вопрос без длинного вступления.",
             },
             next_available_at=next_available_at,
@@ -77,7 +76,12 @@ class FortuneCookieCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(embed.title, "🥠 Печенье открыто: Разговор без репетиции")
         self.assertEqual(fields["Сила знака"], "Тихий знак")
         self.assertEqual(fields["Тема"], "Общение")
-        self.assertEqual(fields["Срок"], "до конца дня")
+        self.assertNotIn("Срок", fields)
+        self.assertEqual(
+            embed.description,
+            "Знакомый разговор до конца дня поможет тебе спокойно прояснить старый вопрос.",
+        )
+        self.assertFalse(embed.description.startswith(">"))
         self.assertEqual(
             fields["Что поможет"],
             "Задай один прямой вопрос без длинного вступления.",

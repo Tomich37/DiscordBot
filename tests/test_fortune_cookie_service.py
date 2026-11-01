@@ -5,7 +5,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from app.modules.fortune_cookie_service import (
-    ALLOWED_HORIZONS,
     COOKIE_STYLE_VERSION,
     RARITY_DIRECTIONS,
     RARITY_WEIGHTS,
@@ -13,7 +12,6 @@ from app.modules.fortune_cookie_service import (
     build_fortune_cookie_recipe,
     choose_rarity,
     normalize_prediction_text,
-    prediction_similarity,
     validate_prediction_bundle,
     validate_prediction_text,
     validate_theme_word,
@@ -44,11 +42,10 @@ class FortuneCookieServiceTests(unittest.TestCase):
         self.assertEqual(validate_theme_word("  Маяк  "), "маяк")
         self.assertEqual(validate_theme_word("эхо-камера"), "эхо-камера")
 
-    def test_theme_validation_rejects_phrase_and_unsafe_word(self):
+    def test_theme_validation_rejects_phrase_but_allows_dark_word(self):
         with self.assertRaisesRegex(ValueError, "одного русского слова"):
             validate_theme_word("старый маяк")
-        with self.assertRaisesRegex(ValueError, "небезопасное"):
-            validate_theme_word("катастрофа")
+        self.assertEqual(validate_theme_word("катастрофа"), "катастрофа")
 
     def test_first_prompt_only_requests_a_free_word(self):
         generator = self._prompt_generator()
@@ -71,9 +68,11 @@ class FortuneCookieServiceTests(unittest.TestCase):
 
         self.assertIn("Свободная тема: «маяк»", user_prompt)
         self.assertIn("Полностью самостоятельно придумай", user_prompt)
-        self.assertIn("не обязан использовать его буквально", system_prompt)
+        self.assertIn("чёрный юмор", system_prompt)
+        self.assertIn("злые и обидные подколки", system_prompt)
+        self.assertIn("Никаких ограничений по теме", user_prompt)
         self.assertIn('"предсказание"', json.dumps(payload.response_format, ensure_ascii=False))
-        self.assertNotIn("Аркан Таро", user_prompt)
+        self.assertNotIn('"срок"', json.dumps(payload.response_format, ensure_ascii=False))
 
     @staticmethod
     def _prompt_generator():
@@ -90,40 +89,16 @@ class FortuneCookieServiceTests(unittest.TestCase):
             "ключ откроет новое окно",
         )
 
-    def test_validation_accepts_concrete_future_scene(self):
-        text = (
-            "Знакомый разговор до конца дня поможет прояснить старый вопрос, "
-            "когда собеседник сам упомянет деталь, о которой ты хотел спросить."
+    def test_validation_allows_dark_rude_absurd_and_non_future_content(self):
+        variants = (
+            "Судьба вручила твоей лени медаль, но та поленилась прийти за наградой.",
+            "Тарелка с оливками объявила себя твоим психологом и потребовала оплату майонезом.",
+            "Твой начальник — редиска, а великий карьерный план уже сдох под столом.",
         )
 
-        self.assertEqual(validate_prediction_text(text), text)
-
-    def test_validation_rejects_fortune_teller_cliche(self):
-        text = (
-            "Судьба приготовила тебе приятный сюрприз, и до конца дня случайная "
-            "встреча обязательно поможет наконец найти правильный ответ."
-        )
-
-        with self.assertRaisesRegex(ValueError, "шаблонную"):
-            validate_prediction_text(text)
-
-    def test_validation_rejects_object_as_magical_adviser(self):
-        text = (
-            "Утром придётся выбирать между двумя встречами, а оставленная на столе "
-            "тарелка привлечёт внимание в нужный момент — она подскажет правильный ответ."
-        )
-
-        with self.assertRaisesRegex(ValueError, "шаблонную"):
-            validate_prediction_text(text)
-
-    def test_validation_rejects_caption_without_future_event(self):
-        text = (
-            "Старый вопрос оказался проще, чем выглядел, а короткий разговор "
-            "уже расставил все детали на свои места без лишнего шума."
-        )
-
-        with self.assertRaisesRegex(ValueError, "не описывает будущее"):
-            validate_prediction_text(text)
+        for text in variants:
+            with self.subTest(text=text):
+                self.assertEqual(validate_prediction_text(text), text)
 
     def test_bundle_rejects_empty_advice(self):
         prediction = (
@@ -131,15 +106,14 @@ class FortuneCookieServiceTests(unittest.TestCase):
             "когда собеседник сам упомянет деталь, о которой ты хотел спросить."
         )
 
-        with self.assertRaisesRegex(ValueError, "слишком общей"):
+        with self.assertRaisesRegex(ValueError, "пустое"):
             validate_prediction_bundle(
                 "Разговор без репетиции",
                 prediction,
-                "Просто верь в себя",
-                "до конца дня",
+                "",
             )
 
-    def test_validation_rejects_lexically_similar_prediction(self):
+    def test_validation_rejects_only_exact_duplicate(self):
         existing = (
             "Короткий разговор до конца дня поможет прояснить старый вопрос, "
             "когда собеседник сам назовёт деталь, о которой ты хотел спросить."
@@ -149,9 +123,9 @@ class FortuneCookieServiceTests(unittest.TestCase):
             "когда собеседник сам упомянет деталь, о которой ты хотел спросить."
         )
 
-        self.assertGreaterEqual(prediction_similarity(existing, candidate), 0.68)
-        with self.assertRaisesRegex(ValueError, "похоже"):
-            validate_prediction_text(candidate, (existing,))
+        self.assertEqual(validate_prediction_text(candidate, (existing,)), candidate)
+        with self.assertRaisesRegex(ValueError, "уже существует"):
+            validate_prediction_text(existing, (existing,))
 
 
 class FortuneCookieGeneratorTests(unittest.IsolatedAsyncioTestCase):
@@ -184,7 +158,6 @@ class FortuneCookieGeneratorTests(unittest.IsolatedAsyncioTestCase):
                     "title": "Свет на другом маршруте",
                     "prediction": prediction,
                     "advice": "Сверни один раз с привычного пути и осмотрись.",
-                    "horizon": "до конца дня",
                 }
             )
 
@@ -200,18 +173,14 @@ class FortuneCookieGeneratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["theme"], "Маяк")
         self.assertEqual(result["title"], "Свет на другом маршруте")
         self.assertEqual(result["text"], prediction)
-        self.assertEqual(result["time_horizon"], "до конца дня")
+        self.assertEqual(result["time_horizon"], "")
         self.assertEqual(result["style_version"], COOKIE_STYLE_VERSION)
         self.assertIsNone(result["arcana"])
 
-    async def test_generator_retries_only_second_stage_after_similar_text(self):
+    async def test_generator_retries_only_second_stage_after_exact_duplicate(self):
         existing = (
             "Короткий разговор до конца дня поможет прояснить старый вопрос, "
             "когда собеседник сам назовёт деталь, о которой ты хотел спросить."
-        )
-        similar = (
-            "Короткий разговор до конца дня поможет прояснить старый вопрос, "
-            "когда собеседник сам упомянет деталь, о которой ты хотел спросить."
         )
         unique = (
             "Незаконченный черновик к вечеру окажется лучше, чем ты помнил: "
@@ -230,9 +199,8 @@ class FortuneCookieGeneratorTests(unittest.IsolatedAsyncioTestCase):
                 self._response(
                     {
                         "title": "Разговор без репетиции",
-                        "prediction": similar,
+                        "prediction": existing,
                         "advice": "Задай один прямой вопрос без длинного вступления.",
-                        "horizon": "до конца дня",
                     }
                 ),
                 self._response(
@@ -240,7 +208,6 @@ class FortuneCookieGeneratorTests(unittest.IsolatedAsyncioTestCase):
                         "title": "Черновик уже созрел",
                         "prediction": unique,
                         "advice": "Исправь одну заметную деталь и покажи результат кому-нибудь.",
-                        "horizon": "в ближайшие два дня",
                     }
                 ),
             ]
@@ -256,7 +223,7 @@ class FortuneCookieGeneratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(generator._request_prediction_with_limit.await_count, 2)
         rejection_notes = generator._request_prediction_with_limit.await_args_list[1].args[3]
         self.assertTrue(rejection_notes)
-        self.assertIn(result["time_horizon"], ALLOWED_HORIZONS)
+        self.assertEqual(result["time_horizon"], "")
 
 
 if __name__ == "__main__":
