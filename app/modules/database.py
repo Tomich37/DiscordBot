@@ -2002,7 +2002,7 @@ class Database:
         summary_on: date,
         scheduled_at: datetime,
     ) -> list[dict]:
-        """Находит активные цели, которым ещё не отправляли сегодняшнюю сводку."""
+        """Находит активные цели, которым ещё не отправляли сводку за указанную дату."""
 
         with Session(autoflush=False, bind=engine) as db:
             challenges = (

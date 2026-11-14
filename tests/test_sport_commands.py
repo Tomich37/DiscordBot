@@ -1,8 +1,10 @@
 import unittest
 from datetime import date, datetime, timezone
+from zoneinfo import ZoneInfo
 
 from app.modules.cogs.sport_commands import (
     SportCommands,
+    _daily_summary_period,
     _discord_datetime,
     _leaderboard_text,
     _progress_bar,
@@ -91,6 +93,20 @@ class SportCommandHelpersTests(unittest.TestCase):
         self.assertIn("<@5>", embed.fields[0].value)
         self.assertEqual(embed.fields[1].value, "**7,000** шагов")
         self.assertEqual(embed.footer.text, "Сводка за 29.10.2026")
+
+    def test_daily_summary_uses_full_previous_day_after_morning_hour(self):
+        local_now = datetime(2026, 10, 30, 9, 15, tzinfo=ZoneInfo("Asia/Tomsk"))
+
+        summary_on, period_start, period_end = _daily_summary_period(local_now, 9)
+
+        self.assertEqual(summary_on, date(2026, 10, 29))
+        self.assertEqual(period_start, datetime(2026, 10, 28, 17, 0))
+        self.assertEqual(period_end, datetime(2026, 10, 29, 17, 0))
+
+    def test_daily_summary_waits_for_configured_morning_hour(self):
+        local_now = datetime(2026, 10, 30, 8, 59, tzinfo=ZoneInfo("Asia/Tomsk"))
+
+        self.assertIsNone(_daily_summary_period(local_now, 9))
 
 
 if __name__ == "__main__":

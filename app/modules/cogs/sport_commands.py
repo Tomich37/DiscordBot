@@ -41,7 +41,7 @@ def _leaderboard_text(rows: list[dict], unit_name: str) -> str:
     )
 
 
-def _read_summary_hour(default: int = 21) -> int:
+def _read_summary_hour(default: int = 9) -> int:
     """Читает час публикации и ограничивает его диапазоном суток."""
 
     try:
@@ -55,6 +55,30 @@ def _utc_naive(value: datetime) -> datetime:
     """Переводит локальное aware-время в формат UTC, используемый БД."""
 
     return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _daily_summary_period(
+    local_now: datetime,
+    summary_hour: int,
+) -> tuple[date, datetime, datetime] | None:
+    """Возвращает дату и UTC-границы прошлого дня после утреннего запуска."""
+
+    scheduled_local = local_now.replace(
+        hour=summary_hour,
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+    if local_now < scheduled_local:
+        return None
+
+    period_end_local = scheduled_local.replace(hour=0)
+    period_start_local = period_end_local - timedelta(days=1)
+    return (
+        period_start_local.date(),
+        _utc_naive(period_start_local),
+        _utc_naive(period_end_local),
+    )
 
 
 class SportCommands(commands.Cog):
@@ -432,7 +456,7 @@ class SportCommands(commands.Cog):
             value=(
                 _leaderboard_text(rows, challenge["unit_name"])
                 if rows
-                else "Сегодня ещё никто не добавил результат."
+                else "За этот день никто не добавил результат."
             ),
             inline=False,
         )
@@ -504,23 +528,14 @@ class SportCommands(commands.Cog):
 
     async def _publish_daily_summaries(self):
         local_now = datetime.now(self.sport_timezone)
-        scheduled_local = local_now.replace(
-            hour=self.summary_hour,
-            minute=0,
-            second=0,
-            microsecond=0,
-        )
-        if local_now < scheduled_local:
+        summary_period = _daily_summary_period(local_now, self.summary_hour)
+        if summary_period is None:
             return
 
-        summary_on = local_now.date()
-        period_start = _utc_naive(
-            local_now.replace(hour=0, minute=0, second=0, microsecond=0)
-        )
-        period_end = _utc_naive(local_now)
+        summary_on, period_start, period_end = summary_period
         challenges = await self.db.get_sport_challenges_for_daily_summary(
             summary_on=summary_on,
-            scheduled_at=_utc_naive(scheduled_local),
+            scheduled_at=period_end,
         )
         for challenge in challenges:
             rows = await self.db.get_sport_daily_leaderboard(
