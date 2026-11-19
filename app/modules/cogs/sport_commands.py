@@ -56,6 +56,16 @@ def _sport_entry_choice_label(
     return label[:100]
 
 
+def _option_snowflake_id(value) -> int | None:
+    """Извлекает Discord ID из объекта или сырого значения autocomplete."""
+
+    raw_value = getattr(value, "id", value)
+    try:
+        return int(raw_value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _read_summary_hour(default: int = 9) -> int:
     """Читает час публикации и ограничивает его диапазоном суток."""
 
@@ -471,7 +481,7 @@ class SportCommands(commands.Cog):
 
         challenge_name = inter.filled_options.get("challenge")
         selected_user = inter.filled_options.get("user")
-        user_id = getattr(selected_user, "id", None)
+        user_id = _option_snowflake_id(selected_user)
         if not challenge_name or user_id is None:
             return {}
 

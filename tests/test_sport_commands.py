@@ -1,5 +1,6 @@
 import unittest
 from datetime import date, datetime, timezone
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import disnake
@@ -9,6 +10,7 @@ from app.modules.cogs.sport_commands import (
     _daily_summary_period,
     _discord_datetime,
     _leaderboard_text,
+    _option_snowflake_id,
     _progress_bar,
     _sport_entry_choice_label,
 )
@@ -59,6 +61,14 @@ class SportCommandHelpersTests(unittest.TestCase):
             label,
             "#42 · 19.11.2026 10:30 · 5,000 шагов",
         )
+
+    def test_autocomplete_user_id_is_read_from_raw_snowflake(self):
+        self.assertEqual(_option_snowflake_id("123456789012345678"), 123456789012345678)
+
+    def test_autocomplete_user_id_is_read_from_member_object(self):
+        member = SimpleNamespace(id=123456789012345678)
+
+        self.assertEqual(_option_snowflake_id(member), 123456789012345678)
 
     def test_progress_bar_caps_completed_goal(self):
         self.assertEqual(_progress_bar(150, 100, width=4), "████")
@@ -137,6 +147,48 @@ class SportCommandHelpersTests(unittest.TestCase):
         local_now = datetime(2026, 10, 30, 8, 59, tzinfo=ZoneInfo("Asia/Tomsk"))
 
         self.assertIsNone(_daily_summary_period(local_now, 9))
+
+
+class FakeSportAutocompleteDatabase:
+    def __init__(self) -> None:
+        self.requested_user_id = None
+
+    async def get_sport_challenge_by_name(self, **kwargs):
+        return {"id": 7, "unit_name": "часов"}
+
+    async def get_sport_progress_entries(self, **kwargs):
+        self.requested_user_id = kwargs["user_id"]
+        return [
+            {
+                "id": 42,
+                "user_id": kwargs["user_id"],
+                "amount": 5,
+                "recorded_at": datetime(2026, 11, 19, 3, 30),
+            }
+        ]
+
+
+class SportAutocompleteTests(unittest.IsolatedAsyncioTestCase):
+    async def test_entry_autocomplete_accepts_raw_user_snowflake(self):
+        cog = SportCommands.__new__(SportCommands)
+        cog.db = FakeSportAutocompleteDatabase()
+        cog.sport_timezone = ZoneInfo("Asia/Tomsk")
+        inter = SimpleNamespace(
+            guild=SimpleNamespace(id=1),
+            channel=SimpleNamespace(id=2),
+            filled_options={
+                "challenge": "Спим 10000 часов вместе",
+                "user": "123456789012345678",
+            },
+        )
+
+        choices = await cog.autocomplete_sport_entry(inter, "")
+
+        self.assertEqual(cog.db.requested_user_id, 123456789012345678)
+        self.assertEqual(
+            choices,
+            {"#42 · 19.11.2026 10:30 · 5 часов": "42"},
+        )
 
 
 if __name__ == "__main__":
