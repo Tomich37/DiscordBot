@@ -45,12 +45,19 @@ class SportDatabaseTests(unittest.TestCase):
             session.commit()
             return challenge.id
 
-    def _add_entry(self, challenge_id: int, user_id: int, amount: int) -> int:
+    def _add_entry(
+        self,
+        challenge_id: int,
+        user_id: int,
+        amount: int,
+        recorded_at: datetime | None = None,
+    ) -> int:
         with Session(bind=self.engine) as session:
             entry = SportProgressEntry(
                 challenge_id=challenge_id,
                 user_id=user_id,
                 amount=amount,
+                recorded_at=recorded_at or datetime.utcnow(),
             )
             session.add(entry)
             session.commit()
@@ -74,6 +81,41 @@ class SportDatabaseTests(unittest.TestCase):
 
         self.assertEqual([entry["id"] for entry in entries], [selected_id])
         self.assertEqual(entries[0]["user_id"], 10)
+
+    def test_activity_entries_are_filtered_by_user_and_period(self):
+        challenge_id = self._create_challenge()
+        self._add_entry(
+            challenge_id,
+            user_id=10,
+            amount=20,
+            recorded_at=datetime(2026, 11, 18, 12, 0),
+        )
+        self._add_entry(
+            challenge_id,
+            user_id=10,
+            amount=30,
+            recorded_at=datetime(2026, 11, 19, 12, 0),
+        )
+        self._add_entry(
+            challenge_id,
+            user_id=20,
+            amount=40,
+            recorded_at=datetime(2026, 11, 19, 13, 0),
+        )
+
+        entries = self.db.get_sport_activity_entries(
+            challenge_id,
+            user_id=10,
+            period_start=datetime(2026, 11, 19),
+            period_end=datetime(2026, 11, 20),
+        )
+
+        self.assertEqual(entries, [
+            {
+                "amount": 30,
+                "recorded_at": datetime(2026, 11, 19, 12, 0),
+            }
+        ])
 
     def test_cancelling_target_entry_reopens_active_challenge(self):
         challenge_id = self._create_challenge(target=100, status="completed")

@@ -1948,6 +1948,35 @@ class Database:
                 for entry in entries
             ]
 
+    def get_sport_activity_entries(
+        self,
+        challenge_id: int,
+        user_id: int,
+        period_start: datetime,
+        period_end: datetime,
+    ) -> list[dict]:
+        """Возвращает фиксации участника за полуинтервал времени в UTC."""
+
+        with Session(autoflush=False, bind=engine) as db:
+            entries = (
+                db.query(SportProgressEntry)
+                .filter(
+                    SportProgressEntry.challenge_id == challenge_id,
+                    SportProgressEntry.user_id == user_id,
+                    SportProgressEntry.recorded_at >= period_start,
+                    SportProgressEntry.recorded_at < period_end,
+                )
+                .order_by(SportProgressEntry.recorded_at.asc())
+                .all()
+            )
+            return [
+                {
+                    "amount": entry.amount,
+                    "recorded_at": entry.recorded_at,
+                }
+                for entry in entries
+            ]
+
     def cancel_sport_progress(
         self,
         challenge_id: int,

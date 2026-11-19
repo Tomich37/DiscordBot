@@ -6,6 +6,7 @@ psycopg2
 asyncpg
 python-dotenv
 matplotlib
+Pillow
 moviepy
 imageio-ffmpeg
 apscheduler

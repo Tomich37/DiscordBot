@@ -1,9 +1,11 @@
 import unittest
 from datetime import date, datetime, timezone
+from io import BytesIO
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import disnake
+from PIL import Image
 
 from app.modules.cogs.sport_commands import (
     CANCELLED_SPORT_COLOR,
@@ -13,8 +15,10 @@ from app.modules.cogs.sport_commands import (
     _leaderboard_text,
     _option_snowflake_id,
     _progress_bar,
+    _sport_calendar_period_end,
     _sport_entry_choice_label,
 )
+from app.modules.sport_activity_calendar import render_sport_activity_calendar
 
 
 class SportCommandHelpersTests(unittest.TestCase):
@@ -30,6 +34,7 @@ class SportCommandHelpersTests(unittest.TestCase):
             "add",
             "status",
             "top",
+            "calendar",
             "finish",
             "cancel",
             "cancel_my",
@@ -60,6 +65,11 @@ class SportCommandHelpersTests(unittest.TestCase):
         self.assertIn("entry", commands_by_name["cancel_my"].autocompleters)
         self.assertTrue(commands_by_name["cancel"].checks)
         self.assertFalse(commands_by_name["cancel_my"].checks)
+        self.assertEqual(
+            [option.name for option in commands_by_name["calendar"].body.options],
+            ["challenge", "user"],
+        )
+        self.assertFalse(commands_by_name["calendar"].body.options[1].required)
 
     def test_cancel_entry_choice_contains_id_user_amount_and_local_date(self):
         label = _sport_entry_choice_label(
@@ -218,6 +228,52 @@ class SportCommandHelpersTests(unittest.TestCase):
         local_now = datetime(2026, 10, 30, 8, 59, tzinfo=ZoneInfo("Asia/Tomsk"))
 
         self.assertIsNone(_daily_summary_period(local_now, 9))
+
+    def test_active_calendar_ends_today(self):
+        challenge = {
+            "status": "active",
+            "ends_at": datetime(2027, 1, 1),
+        }
+
+        result = _sport_calendar_period_end(
+            challenge,
+            ZoneInfo("Asia/Tomsk"),
+            date(2026, 11, 19),
+        )
+
+        self.assertEqual(result, date(2026, 11, 19))
+
+    def test_finished_calendar_ends_on_local_completion_day(self):
+        challenge = {
+            "status": "completed",
+            "finished_at": datetime(2026, 11, 18, 18, 30),
+        }
+
+        result = _sport_calendar_period_end(
+            challenge,
+            ZoneInfo("Asia/Tomsk"),
+            date(2026, 11, 20),
+        )
+
+        self.assertEqual(result, date(2026, 11, 19))
+
+    def test_activity_calendar_is_generated_as_png(self):
+        image_data = render_sport_activity_calendar(
+            {
+                date(2026, 11, 18): 2_000,
+                date(2026, 11, 19): 5_000,
+            },
+            date(2025, 11, 20),
+            date(2026, 11, 19),
+            "шагов",
+        )
+
+        self.assertIsInstance(image_data, BytesIO)
+        with Image.open(image_data) as image:
+            self.assertEqual(image.format, "PNG")
+            self.assertEqual(image.mode, "RGB")
+            self.assertGreaterEqual(image.width, 960)
+            self.assertEqual(image.height, 292)
 
 
 class FakeSportAutocompleteDatabase:

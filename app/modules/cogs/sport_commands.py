@@ -1,4 +1,6 @@
+import asyncio
 import os
+from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -6,6 +8,7 @@ import disnake
 from disnake.ext import commands, tasks
 
 from app.modules.interaction_response import send_interaction_response
+from app.modules.sport_activity_calendar import render_sport_activity_calendar
 
 
 SPORT_COLOR = 0x2ECC71
@@ -81,6 +84,26 @@ def _utc_naive(value: datetime) -> datetime:
     """Переводит локальное aware-время в формат UTC, используемый БД."""
 
     return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _sport_calendar_period_end(
+    challenge: dict,
+    sport_timezone: ZoneInfo,
+    today: date,
+) -> date:
+    """Выбирает последний день календаря для активной или завершённой цели."""
+
+    if challenge.get("status") == "active":
+        ends_at = challenge.get("ends_at")
+        if ends_at is None:
+            return today
+        challenge_end = _discord_datetime(ends_at).astimezone(sport_timezone).date()
+        return min(challenge_end, today)
+
+    completed_at = challenge.get("finished_at") or challenge.get("ends_at")
+    if completed_at is None:
+        return today
+    return min(_discord_datetime(completed_at).astimezone(sport_timezone).date(), today)
 
 
 def _daily_summary_period(
@@ -326,6 +349,87 @@ class SportCommands(commands.Cog):
         rows = await self.db.get_sport_leaderboard(selected["id"])
         await send_interaction_response(inter, embed=self._build_leaderboard_embed(selected, rows))
 
+    @sport.sub_command(
+        name="calendar",
+        description="Показать личный календарь активности участника",
+    )
+    async def sport_calendar(
+        self,
+        inter: disnake.GuildCommandInteraction,
+        challenge: str,
+        user: disnake.Member = None,
+    ):
+        """
+        Генерирует годовой календарь активности в стиле GitHub.
+
+        Parameters
+        ----------
+        challenge: Название челленджа
+        user: Участник, по умолчанию вы
+        """
+
+        selected = await self._challenge_in_current_channel(
+            inter,
+            challenge,
+            active_only=False,
+        )
+        if not selected:
+            return
+
+        selected_user = user or inter.author
+        today = datetime.now(self.sport_timezone).date()
+        period_end = _sport_calendar_period_end(
+            selected,
+            self.sport_timezone,
+            today,
+        )
+        period_start = period_end - timedelta(days=364)
+        start_local = datetime(
+            period_start.year,
+            period_start.month,
+            period_start.day,
+            tzinfo=self.sport_timezone,
+        )
+        end_exclusive = period_end + timedelta(days=1)
+        end_local = datetime(
+            end_exclusive.year,
+            end_exclusive.month,
+            end_exclusive.day,
+            tzinfo=self.sport_timezone,
+        )
+
+        entries = await self.db.get_sport_activity_entries(
+            challenge_id=selected["id"],
+            user_id=selected_user.id,
+            period_start=_utc_naive(start_local),
+            period_end=_utc_naive(end_local),
+        )
+        activity_by_day = defaultdict(int)
+        for entry in entries:
+            local_day = (
+                _discord_datetime(entry["recorded_at"])
+                .astimezone(self.sport_timezone)
+                .date()
+            )
+            activity_by_day[local_day] += entry["amount"]
+
+        image = await asyncio.to_thread(
+            render_sport_activity_calendar,
+            activity_by_day,
+            period_start,
+            period_end,
+            selected["unit_name"],
+        )
+        filename = f"sport-calendar-{selected['id']}-{selected_user.id}.png"
+        await send_interaction_response(
+            inter,
+            content=(
+                f"📅 Личный календарь активности · **{selected['activity_name']}** · "
+                f"{selected_user.mention}"
+            ),
+            file=disnake.File(image, filename=filename),
+        )
+
     @sport.sub_command(name="cancel", description="Отменить ошибочную запись участника")
     @commands.has_permissions(manage_guild=True)
     async def sport_cancel(
@@ -504,6 +608,7 @@ class SportCommands(commands.Cog):
         return await self._challenge_name_choices(inter, current, active_only=True)
 
     @sport_top.autocomplete("challenge")
+    @sport_calendar.autocomplete("challenge")
     @sport_cancel.autocomplete("challenge")
     @sport_cancel_my.autocomplete("challenge")
     async def autocomplete_any_challenge(
