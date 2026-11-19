@@ -2,6 +2,8 @@ import unittest
 from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 
+import disnake
+
 from app.modules.cogs.sport_commands import (
     SportCommands,
     _daily_summary_period,
@@ -33,7 +35,11 @@ class SportCommandHelpersTests(unittest.TestCase):
 
         self.assertEqual(
             [option.name for option in commands_by_name["cancel"].body.options],
-            ["challenge", "entry"],
+            ["challenge", "user", "entry"],
+        )
+        self.assertEqual(
+            commands_by_name["cancel"].body.options[1].type,
+            disnake.OptionType.user,
         )
         self.assertIn("entry", commands_by_name["cancel"].autocompleters)
 
@@ -51,7 +57,7 @@ class SportCommandHelpersTests(unittest.TestCase):
 
         self.assertEqual(
             label,
-            "#42 · 19.11.2026 10:30 · пользователь 123 · 5,000 шагов",
+            "#42 · 19.11.2026 10:30 · 5,000 шагов",
         )
 
     def test_progress_bar_caps_completed_goal(self):

@@ -51,7 +51,7 @@ def _sport_entry_choice_label(
     recorded_at = _discord_datetime(entry["recorded_at"]).astimezone(sport_timezone)
     label = (
         f"#{entry['id']} · {recorded_at:%d.%m.%Y %H:%M} · "
-        f"пользователь {entry['user_id']} · {entry['amount']:,} {unit_name}"
+        f"{entry['amount']:,} {unit_name}"
     )
     return label[:100]
 
@@ -321,9 +321,18 @@ class SportCommands(commands.Cog):
         self,
         inter: disnake.GuildCommandInteraction,
         challenge: str,
+        user: disnake.Member,
         entry: str,
     ):
-        """Удаляет выбранную фиксацию из прогресса челленджа."""
+        """
+        Удаляет выбранную фиксацию из прогресса челленджа.
+
+        Parameters
+        ----------
+        challenge: Название челленджа
+        user: Участник, чьи записи нужно показать
+        entry: Фиксация, которую нужно отменить
+        """
 
         selected = await self._challenge_in_current_channel(
             inter,
@@ -343,11 +352,15 @@ class SportCommands(commands.Cog):
             )
             return
 
-        result = await self.db.cancel_sport_progress(selected["id"], entry_id)
+        result = await self.db.cancel_sport_progress(
+            selected["id"],
+            entry_id,
+            user_id=user.id,
+        )
         if result["status"] == "not_found":
             await send_interaction_response(
                 inter,
-                "Эта запись не найдена или уже была отменена.",
+                "У выбранного пользователя эта запись не найдена или уже была отменена.",
                 ephemeral=True,
             )
             return
@@ -457,7 +470,9 @@ class SportCommands(commands.Cog):
             return {}
 
         challenge_name = inter.filled_options.get("challenge")
-        if not challenge_name:
+        selected_user = inter.filled_options.get("user")
+        user_id = getattr(selected_user, "id", None)
+        if not challenge_name or user_id is None:
             return {}
 
         challenge = await self.db.get_sport_challenge_by_name(
@@ -471,6 +486,7 @@ class SportCommands(commands.Cog):
 
         entries = await self.db.get_sport_progress_entries(
             challenge_id=challenge["id"],
+            user_id=user_id,
             search=current,
         )
         return {

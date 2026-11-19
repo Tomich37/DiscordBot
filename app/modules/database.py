@@ -1905,6 +1905,7 @@ class Database:
     def get_sport_progress_entries(
         self,
         challenge_id: int,
+        user_id: int | None = None,
         search: str = "",
         limit: int = 25,
     ) -> list[dict]:
@@ -1914,13 +1915,15 @@ class Database:
             query = db.query(SportProgressEntry).filter(
                 SportProgressEntry.challenge_id == challenge_id
             )
+            if user_id is not None:
+                query = query.filter(SportProgressEntry.user_id == user_id)
+
             normalized_search = search.strip()
             if normalized_search.isdigit():
                 numeric_search = int(normalized_search)
                 query = query.filter(
                     or_(
                         SportProgressEntry.id == numeric_search,
-                        SportProgressEntry.user_id == numeric_search,
                         SportProgressEntry.amount == numeric_search,
                     )
                 )
@@ -1945,7 +1948,12 @@ class Database:
                 for entry in entries
             ]
 
-    def cancel_sport_progress(self, challenge_id: int, entry_id: int) -> dict:
+    def cancel_sport_progress(
+        self,
+        challenge_id: int,
+        entry_id: int,
+        user_id: int | None = None,
+    ) -> dict:
         """Удаляет выбранную фиксацию и при необходимости возобновляет челлендж."""
 
         with Session(autoflush=False, bind=engine) as db:
@@ -1958,11 +1966,13 @@ class Database:
             if not challenge:
                 return {"status": "not_found"}
 
-            entry = (
-                db.query(SportProgressEntry)
-                .filter_by(id=entry_id, challenge_id=challenge_id)
-                .first()
+            entry_query = db.query(SportProgressEntry).filter_by(
+                id=entry_id,
+                challenge_id=challenge_id,
             )
+            if user_id is not None:
+                entry_query = entry_query.filter(SportProgressEntry.user_id == user_id)
+            entry = entry_query.first()
             if not entry:
                 return {"status": "not_found"}
 

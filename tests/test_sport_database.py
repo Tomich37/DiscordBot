@@ -65,6 +65,16 @@ class SportDatabaseTests(unittest.TestCase):
 
         self.assertEqual([entry["id"] for entry in entries], [second_id, first_id])
 
+    def test_progress_entries_are_filtered_by_selected_user(self):
+        challenge_id = self._create_challenge()
+        selected_id = self._add_entry(challenge_id, user_id=10, amount=20)
+        self._add_entry(challenge_id, user_id=20, amount=30)
+
+        entries = self.db.get_sport_progress_entries(challenge_id, user_id=10)
+
+        self.assertEqual([entry["id"] for entry in entries], [selected_id])
+        self.assertEqual(entries[0]["user_id"], 10)
+
     def test_cancelling_target_entry_reopens_active_challenge(self):
         challenge_id = self._create_challenge(target=100, status="completed")
         remaining_id = self._add_entry(challenge_id, user_id=10, amount=40)
@@ -92,6 +102,19 @@ class SportDatabaseTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "not_found")
         self.assertEqual(len(self.db.get_sport_progress_entries(second_challenge_id)), 1)
+
+    def test_entry_from_another_user_cannot_be_cancelled(self):
+        challenge_id = self._create_challenge()
+        entry_id = self._add_entry(challenge_id, user_id=20, amount=30)
+
+        result = self.db.cancel_sport_progress(
+            challenge_id,
+            entry_id,
+            user_id=10,
+        )
+
+        self.assertEqual(result["status"], "not_found")
+        self.assertEqual(len(self.db.get_sport_progress_entries(challenge_id)), 1)
 
 
 if __name__ == "__main__":
