@@ -25,7 +25,15 @@ class SportCommandHelpersTests(unittest.TestCase):
             [option.name for option in commands_by_name["create"].body.options],
             ["channel", "name", "unit", "target", "duration_days"],
         )
-        for command_name in ("join", "add", "status", "top", "finish", "cancel"):
+        for command_name in (
+            "join",
+            "add",
+            "status",
+            "top",
+            "finish",
+            "cancel",
+            "cancel_my",
+        ):
             option_names = [
                 option.name
                 for option in commands_by_name[command_name].body.options
@@ -45,6 +53,13 @@ class SportCommandHelpersTests(unittest.TestCase):
             disnake.OptionType.user,
         )
         self.assertIn("entry", commands_by_name["cancel"].autocompleters)
+        self.assertEqual(
+            [option.name for option in commands_by_name["cancel_my"].body.options],
+            ["challenge", "entry"],
+        )
+        self.assertIn("entry", commands_by_name["cancel_my"].autocompleters)
+        self.assertTrue(commands_by_name["cancel"].checks)
+        self.assertFalse(commands_by_name["cancel_my"].checks)
 
     def test_cancel_entry_choice_contains_id_user_amount_and_local_date(self):
         label = _sport_entry_choice_label(
@@ -141,6 +156,32 @@ class SportCommandHelpersTests(unittest.TestCase):
         self.assertIn("**1,418 / 10,000** часов", embed.fields[2].value)
         self.assertEqual(embed.footer.text, "Фиксация #42")
 
+    def test_self_cancelled_entry_embed_names_participant(self):
+        challenge = {
+            "activity_name": "10к шагов",
+            "unit_name": "шагов",
+            "target_amount": 10_000,
+            "total_amount": 500,
+        }
+        entry = {
+            "id": 7,
+            "user_id": 123,
+            "amount": 100,
+            "recorded_at": datetime(2026, 11, 19, 3, 30),
+        }
+
+        embed = SportCommands._build_cancelled_entry_embed(
+            challenge,
+            entry,
+            cancelled_by=123,
+            reopened=False,
+        )
+
+        self.assertEqual(
+            embed.description,
+            "Участник <@123> отменил свой результат.",
+        )
+
     def test_daily_summary_contains_top_five_and_remaining_amount(self):
         challenge = {
             "activity_name": "10к шагов",
@@ -213,6 +254,25 @@ class SportAutocompleteTests(unittest.IsolatedAsyncioTestCase):
         )
 
         choices = await cog.autocomplete_sport_entry(inter, "")
+
+        self.assertEqual(cog.db.requested_user_id, 123456789012345678)
+        self.assertEqual(
+            choices,
+            {"#42 · 19.11.2026 10:30 · 5 часов": "42"},
+        )
+
+    async def test_own_entry_autocomplete_uses_interaction_author(self):
+        cog = SportCommands.__new__(SportCommands)
+        cog.db = FakeSportAutocompleteDatabase()
+        cog.sport_timezone = ZoneInfo("Asia/Tomsk")
+        inter = SimpleNamespace(
+            guild=SimpleNamespace(id=1),
+            channel=SimpleNamespace(id=2),
+            author=SimpleNamespace(id=123456789012345678),
+            filled_options={"challenge": "Спим 10000 часов вместе"},
+        )
+
+        choices = await cog.autocomplete_own_sport_entry(inter, "")
 
         self.assertEqual(cog.db.requested_user_id, 123456789012345678)
         self.assertEqual(

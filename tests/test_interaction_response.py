@@ -136,6 +136,14 @@ class InteractionResponseTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(interaction.response.done)
         self.assertNotIn(interaction.id, self.bot._deferred_interactions)
 
+    async def test_sport_cancel_my_uses_custom_response(self) -> None:
+        interaction = FakeInteraction(14)
+
+        await acknowledge_slash_command(self.bot, interaction, "sport cancel_my")
+
+        self.assertFalse(interaction.response.done)
+        self.assertNotIn(interaction.id, self.bot._deferred_interactions)
+
     async def test_sport_private_response_does_not_create_public_placeholder(self) -> None:
         interaction = FakeInteraction(8)
         interaction.bot = self.bot

@@ -345,16 +345,62 @@ class SportCommands(commands.Cog):
         entry: Фиксация, которую нужно отменить
         """
 
+        await self._cancel_sport_entry(
+            inter,
+            challenge_name=challenge,
+            entry_value=entry,
+            user_id=user.id,
+            not_found_message=(
+                "У выбранного пользователя эта запись не найдена или уже была отменена."
+            ),
+        )
+
+    @sport.sub_command(name="cancel_my", description="Отменить свою запись в челлендже")
+    async def sport_cancel_my(
+        self,
+        inter: disnake.GuildCommandInteraction,
+        challenge: str,
+        entry: str,
+    ):
+        """
+        Удаляет только собственную фиксацию участника.
+
+        Parameters
+        ----------
+        challenge: Название челленджа
+        entry: Ваша фиксация, которую нужно отменить
+        """
+
+        await self._cancel_sport_entry(
+            inter,
+            challenge_name=challenge,
+            entry_value=entry,
+            user_id=inter.author.id,
+            not_found_message=(
+                "Эта запись вам не принадлежит, не найдена или уже была отменена."
+            ),
+        )
+
+    async def _cancel_sport_entry(
+        self,
+        inter: disnake.GuildCommandInteraction,
+        challenge_name: str,
+        entry_value: str,
+        user_id: int,
+        not_found_message: str,
+    ) -> None:
+        """Отменяет запись указанного пользователя и публикует результат."""
+
         selected = await self._challenge_in_current_channel(
             inter,
-            challenge,
+            challenge_name,
             active_only=False,
         )
         if not selected:
             return
 
         try:
-            entry_id = int(entry)
+            entry_id = int(entry_value)
         except ValueError:
             await send_interaction_response(
                 inter,
@@ -366,12 +412,12 @@ class SportCommands(commands.Cog):
         result = await self.db.cancel_sport_progress(
             selected["id"],
             entry_id,
-            user_id=user.id,
+            user_id=user_id,
         )
         if result["status"] == "not_found":
             await send_interaction_response(
                 inter,
-                "У выбранного пользователя эта запись не найдена или уже была отменена.",
+                not_found_message,
                 ephemeral=True,
             )
             return
@@ -459,6 +505,7 @@ class SportCommands(commands.Cog):
 
     @sport_top.autocomplete("challenge")
     @sport_cancel.autocomplete("challenge")
+    @sport_cancel_my.autocomplete("challenge")
     async def autocomplete_any_challenge(
         self,
         inter: disnake.ApplicationCommandInteraction,
@@ -497,6 +544,44 @@ class SportCommands(commands.Cog):
         entries = await self.db.get_sport_progress_entries(
             challenge_id=challenge["id"],
             user_id=user_id,
+            search=current,
+        )
+        return {
+            _sport_entry_choice_label(
+                entry,
+                challenge["unit_name"],
+                self.sport_timezone,
+            ): str(entry["id"])
+            for entry in entries
+        }
+
+    @sport_cancel_my.autocomplete("entry")
+    async def autocomplete_own_sport_entry(
+        self,
+        inter: disnake.ApplicationCommandInteraction,
+        current: str,
+    ):
+        """Показывает только собственные фиксации участника."""
+
+        if not inter.guild or not inter.channel:
+            return {}
+
+        challenge_name = inter.filled_options.get("challenge")
+        if not challenge_name:
+            return {}
+
+        challenge = await self.db.get_sport_challenge_by_name(
+            guild_id=inter.guild.id,
+            channel_id=inter.channel.id,
+            activity_name=challenge_name,
+            active_only=False,
+        )
+        if not challenge:
+            return {}
+
+        entries = await self.db.get_sport_progress_entries(
+            challenge_id=challenge["id"],
+            user_id=inter.author.id,
             search=current,
         )
         return {
@@ -573,12 +658,17 @@ class SportCommands(commands.Cog):
     ) -> disnake.Embed:
         """Публично сообщает об отмене ошибочной спортивной фиксации."""
 
-        embed = disnake.Embed(
-            title="❌ Спортивная запись отменена",
-            description=(
+        if cancelled_by == entry["user_id"]:
+            description = f"Участник <@{entry['user_id']}> отменил свой результат."
+        else:
+            description = (
                 f"Администратор <@{cancelled_by}> отменил результат "
                 f"участника <@{entry['user_id']}>."
-            ),
+            )
+
+        embed = disnake.Embed(
+            title="❌ Спортивная запись отменена",
+            description=description,
             color=CANCELLED_SPORT_COLOR,
         )
         embed.add_field(

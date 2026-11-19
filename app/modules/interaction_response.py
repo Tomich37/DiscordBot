@@ -9,6 +9,7 @@ SLASH_COMMANDS_WITH_CUSTOM_RESPONSE = frozenset({
     "recruitment_create",
     "sport add",
     "sport cancel",
+    "sport cancel_my",
 })
 
 EPHEMERAL_SLASH_COMMANDS = frozenset({
