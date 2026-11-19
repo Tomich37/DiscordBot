@@ -8,6 +8,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Integer,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -388,7 +389,7 @@ class SportChallenge(Base):
     creator_id = Column(BigInteger, nullable=False)
     activity_name = Column(String(100), nullable=False)
     unit_name = Column(String(30), nullable=False)
-    target_amount = Column(BigInteger, nullable=False)
+    target_amount = Column(Numeric(30, 6), nullable=False)
     status = Column(String(20), default="active", nullable=False, index=True)
     started_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     ends_at = Column(DateTime, nullable=False, index=True)
@@ -430,7 +431,7 @@ class SportProgressEntry(Base):
         index=True,
     )
     user_id = Column(BigInteger, nullable=False, index=True)
-    amount = Column(BigInteger, nullable=False)
+    amount = Column(Numeric(30, 6), nullable=False)
     recorded_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
   
 def ensure_schema_updates():
@@ -496,13 +497,27 @@ def ensure_schema_updates():
 
     if "sport_challenges" in inspector.get_table_names():
         columns = {
-            column["name"]
+            column["name"]: column
             for column in inspector.get_columns("sport_challenges")
         }
         if "last_summary_on" not in columns:
             with engine.begin() as connection:
                 connection.execute(
                     text("ALTER TABLE sport_challenges ADD COLUMN last_summary_on DATE")
+                )
+
+        # PostgreSQL безопасно преобразует накопленные целые значения в NUMERIC.
+        if (
+            engine.dialect.name == "postgresql"
+            and not isinstance(columns["target_amount"]["type"], Numeric)
+        ):
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "ALTER TABLE sport_challenges "
+                        "ALTER COLUMN target_amount TYPE NUMERIC(30, 6) "
+                        "USING target_amount::numeric"
+                    )
                 )
 
         # Одно активное название в канале должно однозначно указывать на цель.
@@ -514,6 +529,24 @@ def ensure_schema_updates():
                     "WHERE status = 'active'"
                 )
             )
+
+    if "sport_progress_entries" in inspector.get_table_names():
+        columns = {
+            column["name"]: column
+            for column in inspector.get_columns("sport_progress_entries")
+        }
+        if (
+            engine.dialect.name == "postgresql"
+            and not isinstance(columns["amount"]["type"], Numeric)
+        ):
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "ALTER TABLE sport_progress_entries "
+                        "ALTER COLUMN amount TYPE NUMERIC(30, 6) "
+                        "USING amount::numeric"
+                    )
+                )
 
 
 # Создаём таблицы и добавляем недостающие колонки для уже существующей БД.

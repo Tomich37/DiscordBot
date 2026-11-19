@@ -1,10 +1,17 @@
 import unittest
 from datetime import datetime, timedelta
+from decimal import Decimal
 
-from sqlalchemy import create_engine
+from sqlalchemy import Numeric, create_engine
 
 import app.modules.database as database_module
-from app.modules.alchemy_connect import Base, Session, SportChallenge, SportProgressEntry
+from app.modules.alchemy_connect import (
+    Base,
+    Session,
+    SportChallenge,
+    SportParticipant,
+    SportProgressEntry,
+)
 from app.modules.database import Database
 
 
@@ -16,7 +23,11 @@ class SportDatabaseTests(unittest.TestCase):
         self.engine = create_engine("sqlite:///:memory:")
         Base.metadata.create_all(
             self.engine,
-            tables=[SportChallenge.__table__, SportProgressEntry.__table__],
+            tables=[
+                SportChallenge.__table__,
+                SportParticipant.__table__,
+                SportProgressEntry.__table__,
+            ],
         )
         database_module.engine = self.engine
         self.db = Database()
@@ -25,7 +36,12 @@ class SportDatabaseTests(unittest.TestCase):
         database_module.engine = self.original_engine
         self.engine.dispose()
 
-    def _create_challenge(self, *, target: int = 100, status: str = "active") -> int:
+    def _create_challenge(
+        self,
+        *,
+        target: int | Decimal = 100,
+        status: str = "active",
+    ) -> int:
         with Session(bind=self.engine) as session:
             challenge = SportChallenge(
                 guild_id=1,
@@ -49,7 +65,7 @@ class SportDatabaseTests(unittest.TestCase):
         self,
         challenge_id: int,
         user_id: int,
-        amount: int,
+        amount: int | Decimal,
         recorded_at: datetime | None = None,
     ) -> int:
         with Session(bind=self.engine) as session:
@@ -62,6 +78,11 @@ class SportDatabaseTests(unittest.TestCase):
             session.add(entry)
             session.commit()
             return entry.id
+
+    def _add_participant(self, challenge_id: int, user_id: int) -> None:
+        with Session(bind=self.engine) as session:
+            session.add(SportParticipant(challenge_id=challenge_id, user_id=user_id))
+            session.commit()
 
     def test_progress_entries_are_returned_newest_first(self):
         challenge_id = self._create_challenge()
@@ -116,6 +137,35 @@ class SportDatabaseTests(unittest.TestCase):
                 "recorded_at": datetime(2026, 11, 19, 12, 0),
             }
         ])
+
+    def test_fractional_progress_is_summed_without_rounding_to_integer(self):
+        challenge_id = self._create_challenge(target=Decimal("10.5"))
+        self._add_entry(challenge_id, user_id=10, amount=Decimal("1.25"))
+        self._add_entry(challenge_id, user_id=10, amount=Decimal("2.5"))
+
+        challenge = self.db.finish_sport_challenge(challenge_id)
+
+        self.assertEqual(challenge["target_amount"], Decimal("10.500000"))
+        self.assertEqual(challenge["total_amount"], Decimal("3.750000"))
+
+    def test_fractional_progress_is_added_through_database_api(self):
+        challenge_id = self._create_challenge(target=Decimal("5.5"))
+        self._add_participant(challenge_id, user_id=10)
+
+        result = self.db.add_sport_progress(
+            challenge_id,
+            user_id=10,
+            amount=Decimal("2.25"),
+        )
+
+        self.assertEqual(result["status"], "added")
+        self.assertEqual(result["total_amount"], Decimal("2.250000"))
+
+    def test_sport_amount_columns_use_fixed_precision_numeric(self):
+        self.assertIsInstance(SportChallenge.target_amount.type, Numeric)
+        self.assertIsInstance(SportProgressEntry.amount.type, Numeric)
+        self.assertEqual(SportChallenge.target_amount.type.scale, 6)
+        self.assertEqual(SportProgressEntry.amount.type.scale, 6)
 
     def test_cancelling_target_entry_reopens_active_challenge(self):
         challenge_id = self._create_challenge(target=100, status="completed")

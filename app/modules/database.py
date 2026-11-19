@@ -30,11 +30,13 @@ from app.modules.alchemy_connect import (
     engine,
 )
 from datetime import date, datetime
+from decimal import Decimal
 
 from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 
 from app.modules.fortune_cookie_service import COOKIE_STYLE_VERSION
+from app.modules.sport_amount import normalize_sport_amount
 
 
 class Database:
@@ -1653,7 +1655,10 @@ class Database:
             return [channel.channel_id for channel in channels]
 
     @staticmethod
-    def _serialize_sport_challenge(challenge, total_amount: int = 0) -> dict:
+    def _serialize_sport_challenge(
+        challenge,
+        total_amount: int | Decimal = Decimal("0"),
+    ) -> dict:
         """Возвращает снимок челленджа, не зависящий от открытой сессии БД."""
 
         return {
@@ -1671,7 +1676,7 @@ class Database:
             "finish_reason": challenge.finish_reason,
             "result_announced": challenge.result_announced,
             "last_summary_on": challenge.last_summary_on,
-            "total_amount": int(total_amount or 0),
+            "total_amount": Decimal(str(total_amount or 0)),
         }
 
     @staticmethod
@@ -1687,7 +1692,7 @@ class Database:
         creator_id: int,
         activity_name: str,
         unit_name: str,
-        target_amount: int,
+        target_amount: int | Decimal,
         ends_at: datetime,
     ) -> dict:
         """Создаёт цель с уникальным активным названием внутри канала."""
@@ -1848,7 +1853,12 @@ class Database:
             db.commit()
             return "joined"
 
-    def add_sport_progress(self, challenge_id: int, user_id: int, amount: int) -> dict:
+    def add_sport_progress(
+        self,
+        challenge_id: int,
+        user_id: int,
+        amount: int | Decimal,
+    ) -> dict:
         """Атомарно добавляет результат и закрывает достигнутую общую цель."""
 
         with Session(autoflush=False, bind=engine) as db:
@@ -1864,7 +1874,7 @@ class Database:
                 challenge.status = "expired"
                 challenge.finish_reason = "time_expired"
                 challenge.finished_at = datetime.utcnow()
-                total = int(self._sport_total_query(db, challenge_id).scalar() or 0)
+                total = Decimal(str(self._sport_total_query(db, challenge_id).scalar() or 0))
                 db.commit()
                 return {
                     "status": "expired",
@@ -1888,7 +1898,7 @@ class Database:
                 )
             )
             db.flush()
-            total = int(self._sport_total_query(db, challenge_id).scalar() or 0)
+            total = Decimal(str(self._sport_total_query(db, challenge_id).scalar() or 0))
             completed = total >= challenge.target_amount
             if completed:
                 challenge.status = "completed"
@@ -1918,14 +1928,14 @@ class Database:
             if user_id is not None:
                 query = query.filter(SportProgressEntry.user_id == user_id)
 
-            normalized_search = search.strip()
-            if normalized_search.isdigit():
-                numeric_search = int(normalized_search)
+            normalized_search = search.strip().replace(",", ".")
+            numeric_search = normalize_sport_amount(normalized_search)
+            if numeric_search is not None:
+                conditions = [SportProgressEntry.amount == numeric_search]
+                if normalized_search.isdigit():
+                    conditions.append(SportProgressEntry.id == int(normalized_search))
                 query = query.filter(
-                    or_(
-                        SportProgressEntry.id == numeric_search,
-                        SportProgressEntry.amount == numeric_search,
-                    )
+                    or_(*conditions)
                 )
 
             entries = (
@@ -2015,7 +2025,7 @@ class Database:
             db.delete(entry)
             db.flush()
 
-            total = int(self._sport_total_query(db, challenge_id).scalar() or 0)
+            total = Decimal(str(self._sport_total_query(db, challenge_id).scalar() or 0))
             reopened = False
             if (
                 challenge.status == "completed"
@@ -2053,7 +2063,7 @@ class Database:
             if not challenge:
                 return None
 
-            total = int(self._sport_total_query(db, challenge_id).scalar() or 0)
+            total = Decimal(str(self._sport_total_query(db, challenge_id).scalar() or 0))
             if challenge.status == "active":
                 challenge.status = "expired" if reason == "time_expired" else "finished"
                 challenge.finish_reason = reason
@@ -2105,7 +2115,13 @@ class Database:
                 .limit(limit)
                 .all()
             )
-            return [{"user_id": user_id, "total_amount": int(total or 0)} for user_id, total in rows]
+            return [
+                {
+                    "user_id": user_id,
+                    "total_amount": Decimal(str(total or 0)),
+                }
+                for user_id, total in rows
+            ]
 
     def get_sport_daily_leaderboard(
         self,
@@ -2133,7 +2149,10 @@ class Database:
                 .all()
             )
             return [
-                {"user_id": user_id, "total_amount": int(total or 0)}
+                {
+                    "user_id": user_id,
+                    "total_amount": Decimal(str(total or 0)),
+                }
                 for user_id, total in rows
             ]
 

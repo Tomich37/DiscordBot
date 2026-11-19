@@ -1,5 +1,6 @@
 import unittest
 from datetime import date, datetime, timezone
+from decimal import Decimal
 from io import BytesIO
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
@@ -19,6 +20,7 @@ from app.modules.cogs.sport_commands import (
     _sport_entry_choice_label,
 )
 from app.modules.sport_activity_calendar import render_sport_activity_calendar
+from app.modules.sport_amount import format_sport_amount, normalize_sport_amount
 
 
 class SportCommandHelpersTests(unittest.TestCase):
@@ -70,6 +72,24 @@ class SportCommandHelpersTests(unittest.TestCase):
             ["challenge", "user"],
         )
         self.assertFalse(commands_by_name["calendar"].body.options[1].required)
+        self.assertEqual(
+            commands_by_name["create"].body.options[3].type,
+            disnake.OptionType.number,
+        )
+        self.assertEqual(
+            commands_by_name["add"].body.options[1].type,
+            disnake.OptionType.number,
+        )
+
+    def test_sport_amount_keeps_integer_output_compact(self):
+        self.assertEqual(format_sport_amount(Decimal("2.000000")), "2")
+
+    def test_sport_amount_keeps_fractional_part(self):
+        self.assertEqual(format_sport_amount(Decimal("1234.500000")), "1,234.5")
+
+    def test_sport_amount_is_normalized_without_float_noise(self):
+        self.assertEqual(normalize_sport_amount(2), Decimal("2.000000"))
+        self.assertEqual(normalize_sport_amount(2.5), Decimal("2.500000"))
 
     def test_cancel_entry_choice_contains_id_user_amount_and_local_date(self):
         label = _sport_entry_choice_label(
@@ -136,6 +156,24 @@ class SportCommandHelpersTests(unittest.TestCase):
         self.assertIn("<@123>", embed.description)
         self.assertIn("500", embed.description)
         self.assertEqual(embed.fields[1].value, "**8,500** шагов")
+
+    def test_progress_entry_embed_formats_fraction_without_zero_tail(self):
+        challenge = {
+            "activity_name": "Бег",
+            "unit_name": "км",
+            "target_amount": Decimal("10.000000"),
+            "total_amount": Decimal("2.500000"),
+        }
+
+        embed = SportCommands._build_progress_entry_embed(
+            challenge,
+            user_id=123,
+            amount=Decimal("2.500000"),
+        )
+
+        self.assertIn("**2.5 км**", embed.description)
+        self.assertEqual(embed.fields[0].value, "**2.5 / 10** км")
+        self.assertEqual(embed.fields[1].value, "**7.5** км")
 
     def test_cancelled_entry_embed_is_public_red_notification(self):
         challenge = {

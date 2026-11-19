@@ -2,12 +2,18 @@ import asyncio
 import os
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import disnake
 from disnake.ext import commands, tasks
 
 from app.modules.interaction_response import send_interaction_response
+from app.modules.sport_amount import (
+    SPORT_AMOUNT_MAX,
+    format_sport_amount,
+    normalize_sport_amount,
+)
 from app.modules.sport_activity_calendar import render_sport_activity_calendar
 
 
@@ -25,7 +31,11 @@ def _discord_datetime(value: datetime) -> datetime:
     return value
 
 
-def _progress_bar(current: int, target: int, width: int = 12) -> str:
+def _progress_bar(
+    current: int | float | Decimal,
+    target: int | float | Decimal,
+    width: int = 12,
+) -> str:
     """Строит компактную шкалу общего прогресса."""
 
     ratio = min(max(current / target, 0), 1) if target > 0 else 0
@@ -40,7 +50,7 @@ def _leaderboard_text(rows: list[dict], unit_name: str) -> str:
     medals = {1: "🥇", 2: "🥈", 3: "🥉"}
     return "\n".join(
         f"{medals.get(place, f'**{place}.**')} <@{row['user_id']}> — "
-        f"**{row['total_amount']:,}** {unit_name}"
+        f"**{format_sport_amount(row['total_amount'])}** {unit_name}"
         for place, row in enumerate(rows, start=1)
     )
 
@@ -55,7 +65,7 @@ def _sport_entry_choice_label(
     recorded_at = _discord_datetime(entry["recorded_at"]).astimezone(sport_timezone)
     label = (
         f"#{entry['id']} · {recorded_at:%d.%m.%Y %H:%M} · "
-        f"{entry['amount']:,} {unit_name}"
+        f"{format_sport_amount(entry['amount'])} {unit_name}"
     )
     return label[:100]
 
@@ -171,7 +181,7 @@ class SportCommands(commands.Cog):
         channel: disnake.TextChannel,
         name: str,
         unit: str,
-        target: int,
+        target: float,
         duration_days: int,
     ):
         """
@@ -202,8 +212,17 @@ class SportCommands(commands.Cog):
                 ephemeral=True,
             )
             return
-        if target <= 0 or target > 9_000_000_000_000_000_000:
-            await send_interaction_response(inter, "Цель должна быть положительным числом.", ephemeral=True)
+        target_amount = normalize_sport_amount(target)
+        if (
+            target_amount is None
+            or target_amount <= 0
+            or target_amount > SPORT_AMOUNT_MAX
+        ):
+            await send_interaction_response(
+                inter,
+                "Цель должна быть положительным числом с точностью до 6 знаков после точки.",
+                ephemeral=True,
+            )
             return
         if duration_days < 1 or duration_days > 365:
             await send_interaction_response(
@@ -220,7 +239,7 @@ class SportCommands(commands.Cog):
             creator_id=inter.author.id,
             activity_name=name,
             unit_name=unit,
-            target_amount=target,
+            target_amount=target_amount,
             ends_at=ends_at,
         )
         if result["status"] == "already_active":
@@ -286,7 +305,7 @@ class SportCommands(commands.Cog):
         self,
         inter: disnake.GuildCommandInteraction,
         challenge: str,
-        amount: int,
+        amount: float,
     ):
         """
         Добавляет новую отметку участника.
@@ -297,15 +316,28 @@ class SportCommands(commands.Cog):
         amount: Сколько выполнено с прошлой отметки
         """
 
-        if amount <= 0 or amount > 9_000_000_000_000_000_000:
-            await send_interaction_response(inter, "Результат должен быть положительным числом.", ephemeral=True)
+        normalized_amount = normalize_sport_amount(amount)
+        if (
+            normalized_amount is None
+            or normalized_amount <= 0
+            or normalized_amount > SPORT_AMOUNT_MAX
+        ):
+            await send_interaction_response(
+                inter,
+                "Результат должен быть положительным числом с точностью до 6 знаков после точки.",
+                ephemeral=True,
+            )
             return
 
         selected = await self._challenge_in_current_channel(inter, challenge)
         if not selected:
             return
 
-        result = await self.db.add_sport_progress(selected["id"], inter.author.id, amount)
+        result = await self.db.add_sport_progress(
+            selected["id"],
+            inter.author.id,
+            normalized_amount,
+        )
         if result["status"] == "not_joined":
             await send_interaction_response(
                 inter,
@@ -324,7 +356,7 @@ class SportCommands(commands.Cog):
             embed=self._build_progress_entry_embed(
                 updated,
                 user_id=inter.author.id,
-                amount=amount,
+                amount=normalized_amount,
             ),
         )
         if result["status"] == "completed":
@@ -711,7 +743,8 @@ class SportCommands(commands.Cog):
             name="Общий прогресс",
             value=(
                 f"`{_progress_bar(current, target)}` **{percent:.1f}%**\n"
-                f"**{current:,} / {target:,}** {challenge['unit_name']}"
+                f"**{format_sport_amount(current)} / {format_sport_amount(target)}** "
+                f"{challenge['unit_name']}"
             ),
             inline=False,
         )
@@ -727,7 +760,7 @@ class SportCommands(commands.Cog):
     def _build_progress_entry_embed(
         challenge: dict,
         user_id: int,
-        amount: int,
+        amount: int | float | Decimal,
     ) -> disnake.Embed:
         """Публично показывает новую активность участника."""
 
@@ -737,19 +770,23 @@ class SportCommands(commands.Cog):
         embed = disnake.Embed(
             title="🏃 Новый спортивный результат",
             description=(
-                f"<@{user_id}> добавляет **{amount:,} {challenge['unit_name']}** "
+                f"<@{user_id}> добавляет **{format_sport_amount(amount)} "
+                f"{challenge['unit_name']}** "
                 f"в челлендж **{challenge['activity_name']}**."
             ),
             color=SPORT_COLOR,
         )
         embed.add_field(
             name="Общий прогресс",
-            value=f"**{current:,} / {target:,}** {challenge['unit_name']}",
+            value=(
+                f"**{format_sport_amount(current)} / {format_sport_amount(target)}** "
+                f"{challenge['unit_name']}"
+            ),
             inline=True,
         )
         embed.add_field(
             name="Осталось",
-            value=f"**{remaining:,}** {challenge['unit_name']}",
+            value=f"**{format_sport_amount(remaining)}** {challenge['unit_name']}",
             inline=True,
         )
         return embed
@@ -784,7 +821,7 @@ class SportCommands(commands.Cog):
         embed.add_field(
             name="Отменённый результат",
             value=(
-                f"**{entry['amount']:,} {challenge['unit_name']}**\n"
+                f"**{format_sport_amount(entry['amount'])} {challenge['unit_name']}**\n"
                 f"{disnake.utils.format_dt(_discord_datetime(entry['recorded_at']), style='f')}"
             ),
             inline=True,
@@ -792,7 +829,8 @@ class SportCommands(commands.Cog):
         embed.add_field(
             name="Новый общий прогресс",
             value=(
-                f"**{challenge['total_amount']:,} / {challenge['target_amount']:,}** "
+                f"**{format_sport_amount(challenge['total_amount'])} / "
+                f"{format_sport_amount(challenge['target_amount'])}** "
                 f"{challenge['unit_name']}"
             ),
             inline=True,
@@ -833,12 +871,15 @@ class SportCommands(commands.Cog):
         )
         embed.add_field(
             name="Осталось до цели",
-            value=f"**{remaining:,}** {challenge['unit_name']}",
+            value=f"**{format_sport_amount(remaining)}** {challenge['unit_name']}",
             inline=False,
         )
         embed.add_field(
             name="Общий прогресс",
-            value=f"**{current:,} / {target:,}** {challenge['unit_name']}",
+            value=(
+                f"**{format_sport_amount(current)} / {format_sport_amount(target)}** "
+                f"{challenge['unit_name']}"
+            ),
             inline=False,
         )
         embed.set_footer(text=f"Сводка за {summary_on:%d.%m.%Y}")
@@ -854,7 +895,11 @@ class SportCommands(commands.Cog):
         )
         embed.add_field(
             name="Общий результат",
-            value=f"**{challenge.get('total_amount', 0):,} / {challenge['target_amount']:,}** {challenge['unit_name']}",
+            value=(
+                f"**{format_sport_amount(challenge.get('total_amount', 0))} / "
+                f"{format_sport_amount(challenge['target_amount'])}** "
+                f"{challenge['unit_name']}"
+            ),
             inline=False,
         )
         if final:

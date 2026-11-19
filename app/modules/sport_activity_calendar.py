@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from datetime import date, timedelta
 from io import BytesIO
 from pathlib import Path
@@ -7,6 +8,8 @@ from typing import Mapping
 
 import matplotlib
 from PIL import Image, ImageDraw, ImageFont
+
+from app.modules.sport_amount import format_sport_amount
 
 
 # Палитра повторяет тёмную тему GitHub, чтобы календарь привычно читался в Discord.
@@ -42,22 +45,23 @@ def _font(size: int, *, bold: bool = False) -> ImageFont.FreeTypeFont:
     return ImageFont.truetype(str(font_path), size=size)
 
 
-def _activity_level(amount: int, maximum: int) -> int:
+def _activity_level(amount: Decimal, maximum: Decimal) -> int:
     """Распределяет дневной результат по четырём уровням насыщенности."""
 
     if amount <= 0 or maximum <= 0:
         return 0
-    return min(4, max(1, (amount * 4 + maximum - 1) // maximum))
-
-
-def _format_amount(value: int) -> str:
-    """Форматирует числа с привычными для русского текста пробелами."""
-
-    return f"{value:,}".replace(",", " ")
+    ratio = amount / maximum
+    if ratio <= Decimal("0.25"):
+        return 1
+    if ratio <= Decimal("0.5"):
+        return 2
+    if ratio <= Decimal("0.75"):
+        return 3
+    return 4
 
 
 def render_sport_activity_calendar(
-    activity_by_day: Mapping[date, int],
+    activity_by_day: Mapping[date, int | float | Decimal],
     period_start: date,
     period_end: date,
     unit_name: str,
@@ -129,16 +133,23 @@ def render_sport_activity_calendar(
         y = grid_top + weekday * cell_step - 1
         draw.text((30, y), label, font=small_font, fill=MUTED_TEXT_COLOR)
 
-    maximum = max((amount for amount in activity_by_day.values() if amount > 0), default=0)
+    decimal_activity = {
+        day: Decimal(str(amount))
+        for day, amount in activity_by_day.items()
+    }
+    maximum = max(
+        (amount for amount in decimal_activity.values() if amount > 0),
+        default=Decimal("0"),
+    )
     active_days = 0
-    total_amount = 0
+    total_amount = Decimal("0")
     for week_index in range(week_count):
         for weekday in range(7):
             current_day = grid_start + timedelta(days=week_index * 7 + weekday)
             if not period_start <= current_day <= period_end:
                 continue
 
-            amount = max(0, int(activity_by_day.get(current_day, 0)))
+            amount = max(Decimal("0"), decimal_activity.get(current_day, Decimal("0")))
             if amount:
                 active_days += 1
                 total_amount += amount
@@ -156,7 +167,7 @@ def render_sport_activity_calendar(
         (30, stats_y),
         (
             f"Дней с активностью: {active_days}  ·  "
-            f"Всего: {_format_amount(total_amount)} {unit_name}"
+            f"Всего: {format_sport_amount(total_amount, thousands_separator=' ')} {unit_name}"
         ),
         font=small_bold_font,
         fill=MUTED_TEXT_COLOR,
