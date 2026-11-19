@@ -128,6 +128,14 @@ class InteractionResponseTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(interaction.response.done)
         self.assertTrue(interaction.response.ephemeral)
 
+    async def test_sport_cancel_is_acknowledged_ephemerally(self) -> None:
+        interaction = FakeInteraction(13)
+
+        await acknowledge_slash_command(self.bot, interaction, "sport cancel")
+
+        self.assertTrue(interaction.response.done)
+        self.assertTrue(interaction.response.ephemeral)
+
     async def test_sport_private_response_does_not_create_public_placeholder(self) -> None:
         interaction = FakeInteraction(8)
         interaction.bot = self.bot

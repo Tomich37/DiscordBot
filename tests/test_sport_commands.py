@@ -8,6 +8,7 @@ from app.modules.cogs.sport_commands import (
     _discord_datetime,
     _leaderboard_text,
     _progress_bar,
+    _sport_entry_choice_label,
 )
 
 
@@ -19,7 +20,7 @@ class SportCommandHelpersTests(unittest.TestCase):
             [option.name for option in commands_by_name["create"].body.options],
             ["channel", "name", "unit", "target", "duration_days"],
         )
-        for command_name in ("join", "add", "status", "top", "finish"):
+        for command_name in ("join", "add", "status", "top", "finish", "cancel"):
             option_names = [
                 option.name
                 for option in commands_by_name[command_name].body.options
@@ -29,6 +30,29 @@ class SportCommandHelpersTests(unittest.TestCase):
                 "challenge",
                 commands_by_name[command_name].autocompleters,
             )
+
+        self.assertEqual(
+            [option.name for option in commands_by_name["cancel"].body.options],
+            ["challenge", "entry"],
+        )
+        self.assertIn("entry", commands_by_name["cancel"].autocompleters)
+
+    def test_cancel_entry_choice_contains_id_user_amount_and_local_date(self):
+        label = _sport_entry_choice_label(
+            {
+                "id": 42,
+                "user_id": 123,
+                "amount": 5_000,
+                "recorded_at": datetime(2026, 11, 19, 3, 30),
+            },
+            "шагов",
+            ZoneInfo("Asia/Tomsk"),
+        )
+
+        self.assertEqual(
+            label,
+            "#42 · 19.11.2026 10:30 · пользователь 123 · 5,000 шагов",
+        )
 
     def test_progress_bar_caps_completed_goal(self):
         self.assertEqual(_progress_bar(150, 100, width=4), "████")

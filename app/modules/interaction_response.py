@@ -15,6 +15,7 @@ EPHEMERAL_SLASH_COMMANDS = frozenset({
     "alchemy_recipes",
     "balance",
     "sport create",
+    "sport cancel",
     "sport finish",
     "sport join",
 })

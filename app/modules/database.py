@@ -31,7 +31,7 @@ from app.modules.alchemy_connect import (
 )
 from datetime import date, datetime
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 
 from app.modules.fortune_cookie_service import COOKIE_STYLE_VERSION
@@ -1900,6 +1900,107 @@ class Database:
                 "status": "completed" if completed else "added",
                 "total_amount": total,
                 "challenge": self._serialize_sport_challenge(challenge, total),
+            }
+
+    def get_sport_progress_entries(
+        self,
+        challenge_id: int,
+        search: str = "",
+        limit: int = 25,
+    ) -> list[dict]:
+        """Возвращает последние фиксации челленджа для выбора администратором."""
+
+        with Session(autoflush=False, bind=engine) as db:
+            query = db.query(SportProgressEntry).filter(
+                SportProgressEntry.challenge_id == challenge_id
+            )
+            normalized_search = search.strip()
+            if normalized_search.isdigit():
+                numeric_search = int(normalized_search)
+                query = query.filter(
+                    or_(
+                        SportProgressEntry.id == numeric_search,
+                        SportProgressEntry.user_id == numeric_search,
+                        SportProgressEntry.amount == numeric_search,
+                    )
+                )
+
+            entries = (
+                query
+                .order_by(
+                    SportProgressEntry.recorded_at.desc(),
+                    SportProgressEntry.id.desc(),
+                )
+                .limit(limit)
+                .all()
+            )
+            return [
+                {
+                    "id": entry.id,
+                    "challenge_id": entry.challenge_id,
+                    "user_id": entry.user_id,
+                    "amount": entry.amount,
+                    "recorded_at": entry.recorded_at,
+                }
+                for entry in entries
+            ]
+
+    def cancel_sport_progress(self, challenge_id: int, entry_id: int) -> dict:
+        """Удаляет выбранную фиксацию и при необходимости возобновляет челлендж."""
+
+        with Session(autoflush=False, bind=engine) as db:
+            challenge = (
+                db.query(SportChallenge)
+                .filter_by(id=challenge_id)
+                .with_for_update()
+                .first()
+            )
+            if not challenge:
+                return {"status": "not_found"}
+
+            entry = (
+                db.query(SportProgressEntry)
+                .filter_by(id=entry_id, challenge_id=challenge_id)
+                .first()
+            )
+            if not entry:
+                return {"status": "not_found"}
+
+            cancelled_entry = {
+                "id": entry.id,
+                "challenge_id": entry.challenge_id,
+                "user_id": entry.user_id,
+                "amount": entry.amount,
+                "recorded_at": entry.recorded_at,
+            }
+            db.delete(entry)
+            db.flush()
+
+            total = int(self._sport_total_query(db, challenge_id).scalar() or 0)
+            reopened = False
+            if (
+                challenge.status == "completed"
+                and challenge.finish_reason == "target_reached"
+                and total < challenge.target_amount
+            ):
+                now = datetime.utcnow()
+                if challenge.ends_at > now:
+                    challenge.status = "active"
+                    challenge.finish_reason = None
+                    challenge.finished_at = None
+                    challenge.result_announced = False
+                    reopened = True
+                else:
+                    challenge.status = "expired"
+                    challenge.finish_reason = "time_expired"
+                    challenge.finished_at = now
+
+            db.commit()
+            return {
+                "status": "cancelled",
+                "entry": cancelled_entry,
+                "challenge": self._serialize_sport_challenge(challenge, total),
+                "reopened": reopened,
             }
 
     def finish_sport_challenge(self, challenge_id: int, reason: str = "manual") -> dict | None:

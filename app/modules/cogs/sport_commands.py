@@ -41,6 +41,21 @@ def _leaderboard_text(rows: list[dict], unit_name: str) -> str:
     )
 
 
+def _sport_entry_choice_label(
+    entry: dict,
+    unit_name: str,
+    sport_timezone: ZoneInfo,
+) -> str:
+    """Формирует короткое описание фиксации для списка Discord."""
+
+    recorded_at = _discord_datetime(entry["recorded_at"]).astimezone(sport_timezone)
+    label = (
+        f"#{entry['id']} · {recorded_at:%d.%m.%Y %H:%M} · "
+        f"пользователь {entry['user_id']} · {entry['amount']:,} {unit_name}"
+    )
+    return label[:100]
+
+
 def _read_summary_hour(default: int = 9) -> int:
     """Читает час публикации и ограничивает его диапазоном суток."""
 
@@ -300,6 +315,56 @@ class SportCommands(commands.Cog):
         rows = await self.db.get_sport_leaderboard(selected["id"])
         await send_interaction_response(inter, embed=self._build_leaderboard_embed(selected, rows))
 
+    @sport.sub_command(name="cancel", description="Отменить ошибочную запись участника")
+    @commands.has_permissions(manage_guild=True)
+    async def sport_cancel(
+        self,
+        inter: disnake.GuildCommandInteraction,
+        challenge: str,
+        entry: str,
+    ):
+        """Удаляет выбранную фиксацию из прогресса челленджа."""
+
+        selected = await self._challenge_in_current_channel(
+            inter,
+            challenge,
+            active_only=False,
+        )
+        if not selected:
+            return
+
+        try:
+            entry_id = int(entry)
+        except ValueError:
+            await send_interaction_response(
+                inter,
+                "Выберите запись из предложенного списка.",
+                ephemeral=True,
+            )
+            return
+
+        result = await self.db.cancel_sport_progress(selected["id"], entry_id)
+        if result["status"] == "not_found":
+            await send_interaction_response(
+                inter,
+                "Эта запись не найдена или уже была отменена.",
+                ephemeral=True,
+            )
+            return
+
+        cancelled = result["entry"]
+        updated = result["challenge"]
+        message = (
+            f"Запись **#{cancelled['id']}** пользователя <@{cancelled['user_id']}> "
+            f"на **{cancelled['amount']:,} {updated['unit_name']}** отменена.\n"
+            f"Общий прогресс: **{updated['total_amount']:,} / "
+            f"{updated['target_amount']:,} {updated['unit_name']}**."
+        )
+        if result["reopened"]:
+            message += "\nЧеллендж снова активен, потому что общая цель больше не достигнута."
+
+        await send_interaction_response(inter, message, ephemeral=True)
+
     @sport.sub_command(name="finish", description="Досрочно завершить челлендж по названию")
     @commands.has_permissions(manage_guild=True)
     async def sport_finish(self, inter: disnake.GuildCommandInteraction, challenge: str):
@@ -370,6 +435,7 @@ class SportCommands(commands.Cog):
         return await self._challenge_name_choices(inter, current, active_only=True)
 
     @sport_top.autocomplete("challenge")
+    @sport_cancel.autocomplete("challenge")
     async def autocomplete_any_challenge(
         self,
         inter: disnake.ApplicationCommandInteraction,
@@ -378,6 +444,43 @@ class SportCommands(commands.Cog):
         """Подсказывает активные и завершённые челленджи текущего канала."""
 
         return await self._challenge_name_choices(inter, current, active_only=False)
+
+    @sport_cancel.autocomplete("entry")
+    async def autocomplete_sport_entry(
+        self,
+        inter: disnake.ApplicationCommandInteraction,
+        current: str,
+    ):
+        """Показывает последние фиксации выбранного челленджа."""
+
+        if not inter.guild or not inter.channel:
+            return {}
+
+        challenge_name = inter.filled_options.get("challenge")
+        if not challenge_name:
+            return {}
+
+        challenge = await self.db.get_sport_challenge_by_name(
+            guild_id=inter.guild.id,
+            channel_id=inter.channel.id,
+            activity_name=challenge_name,
+            active_only=False,
+        )
+        if not challenge:
+            return {}
+
+        entries = await self.db.get_sport_progress_entries(
+            challenge_id=challenge["id"],
+            search=current,
+        )
+        return {
+            _sport_entry_choice_label(
+                entry,
+                challenge["unit_name"],
+                self.sport_timezone,
+            ): str(entry["id"])
+            for entry in entries
+        }
 
     @staticmethod
     def _build_status_embed(challenge: dict) -> disnake.Embed:
