@@ -11,6 +11,7 @@ from app.modules.interaction_response import send_interaction_response
 SPORT_COLOR = 0x2ECC71
 FINAL_SPORT_COLOR = 0xF1C40F
 DAILY_SPORT_COLOR = 0x3498DB
+CANCELLED_SPORT_COLOR = 0xE74C3C
 
 
 def _discord_datetime(value: datetime) -> datetime:
@@ -377,16 +378,15 @@ class SportCommands(commands.Cog):
 
         cancelled = result["entry"]
         updated = result["challenge"]
-        message = (
-            f"Запись **#{cancelled['id']}** пользователя <@{cancelled['user_id']}> "
-            f"на **{cancelled['amount']:,} {updated['unit_name']}** отменена.\n"
-            f"Общий прогресс: **{updated['total_amount']:,} / "
-            f"{updated['target_amount']:,} {updated['unit_name']}**."
+        await send_interaction_response(
+            inter,
+            embed=self._build_cancelled_entry_embed(
+                updated,
+                cancelled,
+                cancelled_by=inter.author.id,
+                reopened=result["reopened"],
+            ),
         )
-        if result["reopened"]:
-            message += "\nЧеллендж снова активен, потому что общая цель больше не достигнута."
-
-        await send_interaction_response(inter, message, ephemeral=True)
 
     @sport.sub_command(name="finish", description="Досрочно завершить челлендж по названию")
     @commands.has_permissions(manage_guild=True)
@@ -562,6 +562,53 @@ class SportCommands(commands.Cog):
             value=f"**{remaining:,}** {challenge['unit_name']}",
             inline=True,
         )
+        return embed
+
+    @staticmethod
+    def _build_cancelled_entry_embed(
+        challenge: dict,
+        entry: dict,
+        cancelled_by: int,
+        reopened: bool,
+    ) -> disnake.Embed:
+        """Публично сообщает об отмене ошибочной спортивной фиксации."""
+
+        embed = disnake.Embed(
+            title="❌ Спортивная запись отменена",
+            description=(
+                f"Администратор <@{cancelled_by}> отменил результат "
+                f"участника <@{entry['user_id']}>."
+            ),
+            color=CANCELLED_SPORT_COLOR,
+        )
+        embed.add_field(
+            name="Челлендж",
+            value=f"**{challenge['activity_name']}**",
+            inline=False,
+        )
+        embed.add_field(
+            name="Отменённый результат",
+            value=(
+                f"**{entry['amount']:,} {challenge['unit_name']}**\n"
+                f"{disnake.utils.format_dt(_discord_datetime(entry['recorded_at']), style='f')}"
+            ),
+            inline=True,
+        )
+        embed.add_field(
+            name="Новый общий прогресс",
+            value=(
+                f"**{challenge['total_amount']:,} / {challenge['target_amount']:,}** "
+                f"{challenge['unit_name']}"
+            ),
+            inline=True,
+        )
+        if reopened:
+            embed.add_field(
+                name="Статус челленджа",
+                value="Цель снова активна, потому что общий результат стал меньше требуемого.",
+                inline=False,
+            )
+        embed.set_footer(text=f"Фиксация #{entry['id']}")
         return embed
 
     @staticmethod

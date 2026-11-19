@@ -8,6 +8,7 @@ SLASH_COMMANDS_WITH_CUSTOM_RESPONSE = frozenset({
     "play",
     "recruitment_create",
     "sport add",
+    "sport cancel",
 })
 
 EPHEMERAL_SLASH_COMMANDS = frozenset({
@@ -15,7 +16,6 @@ EPHEMERAL_SLASH_COMMANDS = frozenset({
     "alchemy_recipes",
     "balance",
     "sport create",
-    "sport cancel",
     "sport finish",
     "sport join",
 })

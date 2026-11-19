@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 import disnake
 
 from app.modules.cogs.sport_commands import (
+    CANCELLED_SPORT_COLOR,
     SportCommands,
     _daily_summary_period,
     _discord_datetime,
@@ -110,6 +111,35 @@ class SportCommandHelpersTests(unittest.TestCase):
         self.assertIn("<@123>", embed.description)
         self.assertIn("500", embed.description)
         self.assertEqual(embed.fields[1].value, "**8,500** шагов")
+
+    def test_cancelled_entry_embed_is_public_red_notification(self):
+        challenge = {
+            "activity_name": "Спим 10000 часов вместе",
+            "unit_name": "часов",
+            "target_amount": 10_000,
+            "total_amount": 1_418,
+        }
+        entry = {
+            "id": 42,
+            "user_id": 123,
+            "amount": 5,
+            "recorded_at": datetime(2026, 11, 19, 3, 30),
+        }
+
+        embed = SportCommands._build_cancelled_entry_embed(
+            challenge,
+            entry,
+            cancelled_by=456,
+            reopened=False,
+        )
+
+        self.assertEqual(embed.color.value, CANCELLED_SPORT_COLOR)
+        self.assertIn("<@456>", embed.description)
+        self.assertIn("<@123>", embed.description)
+        self.assertEqual(embed.fields[0].value, "**Спим 10000 часов вместе**")
+        self.assertIn("**5 часов**", embed.fields[1].value)
+        self.assertIn("**1,418 / 10,000** часов", embed.fields[2].value)
+        self.assertEqual(embed.footer.text, "Фиксация #42")
 
     def test_daily_summary_contains_top_five_and_remaining_amount(self):
         challenge = {
